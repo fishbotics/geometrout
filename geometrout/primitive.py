@@ -1,6 +1,8 @@
 from pyquaternion import Quaternion
 import numpy as np
 
+from geometrout import SE3, SO3
+
 
 class Cuboid:
     def __init__(self, center, dims, quaternion):
@@ -13,7 +15,7 @@ class Cuboid:
         # Note that the input type of these is arrays but I'm still casting.
         # This is because its easier to just case to numpy arrays than it is to
         # check for type
-        self._pose = SE(xyz=center, so3=SO3(quat=quaternion))
+        self._pose = SE3(xyz=center, so3=SO3(quat=quaternion))
         self._dims = np.asarray(dims)
 
     @classmethod
@@ -41,7 +43,7 @@ class Cuboid:
                 3
             ) + center_range[0, :]
         else:
-            center = np.array([0, 0, 0])
+            center = np.array([0., 0., 0.]))
         if dimension_range is not None:
             dimension_range = np.asarray(dimension_range)
             assert dimension_range.shape == (
@@ -52,11 +54,11 @@ class Cuboid:
                 3
             ) + dimension_range[0, :]
         else:
-            dims = np.array([1, 1, 1])
+            dims = np.array([1., 1., 1.])
         if quaternion:
             quaternion = Quaternion.random()
         else:
-            quaternion = Quaternion([1, 0, 0, 0])
+            quaternion = Quaternion([1., 0., 0., 0.])
 
         return cls(center, dims, quaternion)
 
@@ -158,6 +160,27 @@ class Sphere:
         """
         self._center = np.asarray(center)
         self._radius = radius
+
+    @classmethod
+    def random(cls, center_range=None, radius_range=None):
+        if center_range is not None:
+            center_range = np.asarray(center_range)
+            assert center_range.shape == (
+                2,
+                3,
+            ), "Center range should be passed in as numpy array with 2x3 dimension where first row is the low end of each dimension's range and second row is the high end"
+
+            center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
+                3
+            ) + center_range[0, :]
+        else:
+            center = np.array([0., 0., 0.])
+        if radius_range is not None:
+            mn, mx = radius_range
+            radius = (mx - mn) * np.random.rand() + mn
+        else:
+            radius = np.random.rand()
+        return cls(center, radius)
 
     @property
     def center(self):
