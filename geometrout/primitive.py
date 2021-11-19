@@ -2,6 +2,7 @@ from pyquaternion import Quaternion
 import numpy as np
 
 from geometrout.transform import SE3, SO3
+import geometrout.pointcloud as pc
 
 
 class Cuboid:
@@ -90,7 +91,7 @@ class Cuboid:
         random_points[sides == 4, 2] = self._dims[2] / 2
         random_points[sides == 5, 2] = -self._dims[2] / 2
         transform = self.pose.matrix
-        transform_pointcloud(random_points, transform, in_place=True)
+        pc.transform(random_points, transform, in_place=True)
         noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
         return random_points + noise
 
