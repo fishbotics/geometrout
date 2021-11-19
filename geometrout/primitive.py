@@ -1,7 +1,7 @@
 from pyquaternion import Quaternion
 import numpy as np
 
-from geometrout import SE3, SO3
+from geometrout.transform import SE3, SO3
 
 
 class Cuboid:
