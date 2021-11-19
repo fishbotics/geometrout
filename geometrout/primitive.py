@@ -43,7 +43,7 @@ class Cuboid:
                 3
             ) + center_range[0, :]
         else:
-            center = np.array([0., 0., 0.]))
+            center = np.array([0.0, 0.0, 0.0])
         if dimension_range is not None:
             dimension_range = np.asarray(dimension_range)
             assert dimension_range.shape == (
@@ -54,11 +54,11 @@ class Cuboid:
                 3
             ) + dimension_range[0, :]
         else:
-            dims = np.array([1., 1., 1.])
+            dims = np.array([1.0, 1.0, 1.0])
         if quaternion:
             quaternion = Quaternion.random()
         else:
-            quaternion = Quaternion([1., 0., 0., 0.])
+            quaternion = Quaternion([1.0, 0.0, 0.0, 0.0])
 
         return cls(center, dims, quaternion)
 
@@ -174,7 +174,7 @@ class Sphere:
                 3
             ) + center_range[0, :]
         else:
-            center = np.array([0., 0., 0.])
+            center = np.array([0.0, 0.0, 0.0])
         if radius_range is not None:
             mn, mx = radius_range
             radius = (mx - mn) * np.random.rand() + mn
