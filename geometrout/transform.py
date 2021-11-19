@@ -14,7 +14,7 @@ class SO3:
         if isinstance(quat, Quaternion):
             self._quat = quat
         else:
-            self._quat = Quaternion(np.asarray(quaternion))
+            self._quat = Quaternion(np.asarray(quat))
 
     @classmethod
     def from_rpy(cls, rpy):
