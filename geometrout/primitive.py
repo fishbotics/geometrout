@@ -95,6 +95,12 @@ class Cuboid:
         noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
         return random_points + noise
 
+    def sdf(self, point):
+        """
+        :param point: Point in 3D for which we want the sdf
+        """
+        pass
+
     @property
     def pose(self):
         """
@@ -199,6 +205,9 @@ class Sphere:
     @property
     def surface_area(self):
         return 4 * np.pi * self.radius ** 3
+
+    def is_zero_volume(self):
+        return np.isclose(self.radius, 0)
 
     def sample(self, num_points, noise=0.0):
         assert (
