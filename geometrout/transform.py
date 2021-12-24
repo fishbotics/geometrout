@@ -44,7 +44,21 @@ class SO3:
             ],
             dtype=np.float64,
         )
-        return SO3(Quaternion(matrix=matrix))
+        return cls(Quaternion(matrix=matrix))
+
+    @classmethod
+    def from_unit_axes(cls, x, y, z):
+        assert np.isclose(np.dot(x, y), 0)
+        assert np.isclose(np.dot(x, z), 0)
+        assert np.isclose(np.dot(y, z), 0)
+        assert np.isclose(np.linalg.norm(x), 1)
+        assert np.isclose(np.linalg.norm(y), 1)
+        assert np.isclose(np.linalg.norm(z), 1)
+        m = np.eye(4)
+        m[:3, 0] = x
+        m[:3, 1] = y
+        m[:3, 2] = z
+        return cls(Quaternion(matrix=m))
 
     @property
     def inverse(self):
@@ -163,15 +177,5 @@ class SE3:
         :param z: A unit axis indicating the direction of the z axis
         :return: SE3 object
         """
-        assert np.isclose(np.dot(x, y), 0)
-        assert np.isclose(np.dot(x, z), 0)
-        assert np.isclose(np.dot(y, z), 0)
-        assert np.isclose(np.linalg.norm(x), 1)
-        assert np.isclose(np.linalg.norm(y), 1)
-        assert np.isclose(np.linalg.norm(z), 1)
-        m = np.eye(4)
-        m[:3, 0] = x
-        m[:3, 1] = y
-        m[:3, 2] = z
-        m[:3, 2] = origin
-        return cls(matrix=m)
+        so3 = SO3.from_unit_axes(x, y, z)
+        return cls(xyz=origin, so3=so3)
