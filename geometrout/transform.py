@@ -16,6 +16,9 @@ class SO3:
         else:
             self._quat = Quaternion(np.asarray(quat))
 
+    def __repr__(self):
+        return f"SO3(quat={self.wxyz})"
+
     @classmethod
     def from_rpy(cls, rpy):
         """
@@ -114,6 +117,9 @@ class SE3:
                 self._so3 = SO3.from_rpy(rpy)
             else:
                 self._so3 = so3
+
+    def __repr__(self):
+        return f"SE3(xyz={self.xyz}, quat={self.so3.wxyz})"
 
     def __matmul__(self, other):
         """

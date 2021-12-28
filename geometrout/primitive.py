@@ -19,18 +19,63 @@ class Cuboid:
         self._pose = SE3(xyz=center, so3=SO3(quat=quaternion))
         self._dims = np.asarray(dims)
 
+    def __str__(self):
+        return "\n".join(
+            [
+                "     +----------+",
+                "    /          /|",
+                "  x/          / |",
+                "  /          /  |",
+                " /    y     /   |",
+                "+----------+    |",
+                "|          |    /",
+                "|          |   / ",
+                "|         z|  /  ",
+                "|          | /   ",
+                "+----------+     ",
+                f"Center: {self.center}",
+                f"Dimensions: {self.dims}",
+                f"Orientation (wxyz): {self.pose.so3.wxyz}",
+            ]
+        )
+
+    def __repr__(self):
+        return "\n".join(
+            [
+                "Cuboid(",
+                f"    center={self.center},",
+                f"    dims={self.dims},",
+                f"    quaternion={self.pose.so3.wxyz},",
+                ")",
+            ]
+        )
+
     @classmethod
-    def random(cls, center_range=None, dimension_range=None, quaternion=False):
+    def unit(cls):
+        return cls(
+            center=[0.0, 0.0, 0.0],
+            dims=[1.0, 1.0, 1.0],
+            quaternion=[1.0, 0.0, 0.0, 0.0],
+        )
+
+    @classmethod
+    def random(
+        cls,
+        center_range=[[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
+        dimension_range=[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+        quaternion=True,
+    ):
         """
         Creates a random cuboid within the given ranges
         :param center_range: If given, represents the uniform range from which to draw a center.
             Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
-            If not given, center defaults to [0, 0, 0]
+            If passed as None, center defaults to [0, 0, 0]
         :param dimension_range: If given, represents the uniform range from which to draw a center.
             Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
-            If not given, center defaults to [1, 1, 1]
+            If passed as None, dimensions defaults to [1, 1, 1]
         :param quaternion: If True, will give a random orientation to cuboid.
-            If not given, will be set as the identity
+            If False, will be set as the identity
+            Default is True
         :return: Cuboid object drawn from specified uniform distribution
         """
         if center_range is not None:
@@ -66,7 +111,16 @@ class Cuboid:
     def is_zero_volume(self):
         return np.isclose(self._dims, 0).any()
 
-    def sample(self, num_points, noise=0.0):
+    def sample_surface(self, num_points, noise=0.0):
+        """
+        Samples random points on the surface of the cube. Probabilities are
+        weighed based on area of each side.
+
+        :param num_points: The number of points to sample on the surface
+        :param noise: The range of uniform noise to apply to samples
+
+        :return: A random pointcloud sampled from the surface of the cuboid
+        """
         assert (
             noise >= 0
         ), "Noise parameter should be a radius of the uniform distribution added to the random points"
@@ -95,11 +149,32 @@ class Cuboid:
         noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
         return random_points + noise
 
+    def sample_volume(self, num_points):
+        """
+        Get a random pointcloud sampled inside the cuboid (including the surface)
+
+        :param num_points: The number of points to sample
+        :return: A set of points inside the cube
+        """
+        random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+        random_points = random_points * self._dims / 2
+        transform = self.pose.matrix
+        pc.transform(random_points, transform, in_place=True)
+        return random_points
+
     def sdf(self, point):
         """
         :param point: Point in 3D for which we want the sdf
+        :return: The sdf value of that point
         """
-        pass
+        homog_point = np.ones(4)
+        homog_point[:3] = np.asarray(point)
+        projected_point = (self.pose.inverse.matrix @ homog_point)[:3]
+        distance = np.abs(projected_point) - (self._dims / 2)
+        outside = np.linalg.norm(np.maximum(distance, np.zeros(3)))
+        inner_max_distance = np.max(distance)
+        inside = np.minimum(inner_max_distance, 0)
+        return outside + inside
 
     @property
     def pose(self):
@@ -167,8 +242,52 @@ class Sphere:
         self._center = np.asarray(center)
         self._radius = radius
 
+    def __str__(self):
+        return "\n".join(
+            [
+                "         ▓▓▓▓▓▓▓▓▓▓▓▓               ",
+                "      ░░████░░░░░░░░░░░░████        ",
+                "    ░░██▒▒░░░░░░░░░░░░░░░░░░██      ",
+                "  ░░██▒▒▒▒░░░░░░░░░░░░░░░░░░░░██    ",
+                "  ██▒▒▒▒░░░░░░░░░░░░░░    ░░░░░░██  ",
+                "  ██▒▒▒▒░░░░░░░░░░░░        ░░░░██  ",
+                "██▓▓▒▒▒▒░░░░░░░░░░░░        ░░░░░░██",
+                "██▓▓▒▒▒▒░░░░░░░░░░░░░░    ░░░░░░░░██",
+                "██▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░██",
+                "██▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░██",
+                "██▓▓▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░██",
+                "██▓▓▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░██",
+                "  ▓▓▓▓▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░██  ",
+                "  ██▓▓▓▓▓▓▒▒▒▒▒▒▒▒░░░░░░░░░░▒▒▒▒██  ",
+                "  ░░▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██░░  ",
+                "    ░░▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒██░░    ",
+                "      ░░██▓▓▓▓▓▓▓▓▓▓▓▓▓▓████░░      ",
+                "        ░░░░████████████░░          ",
+                "            ░░░░░░░░░░░░            ",
+                f"Center: {self.center}",
+                f"Radius: {self.radius}",
+            ]
+        )
+
+    def __repr__(self):
+        return f"Sphere(center={self.center}, radius={self.radius})"
+
     @classmethod
-    def random(cls, center_range=None, radius_range=None):
+    def unit(cls):
+        return cls(np.array([0.0, 0.0, 0.0]), 1.0)
+
+    @classmethod
+    def random(
+        cls, center_range=[[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]], radius_range=[0.0, 1.0]
+    ):
+        """
+        Creates a random sphere.
+        :param center_range: 2x3 numpy array or list with form
+          [[x_low, y_low, z_low], [x_high, y_hight, x_max]]. Pass in None to
+          default at origin
+        :param radius_range: List [r_low, r_high]. Pass in None for
+          default radius of None
+        """
         if center_range is not None:
             center_range = np.asarray(center_range)
             assert center_range.shape == (
@@ -185,7 +304,7 @@ class Sphere:
             mn, mx = radius_range
             radius = (mx - mn) * np.random.rand() + mn
         else:
-            radius = np.random.rand()
+            radius = 1.0
         return cls(center, radius)
 
     @property
@@ -209,7 +328,23 @@ class Sphere:
     def is_zero_volume(self):
         return np.isclose(self.radius, 0)
 
-    def sample(self, num_points, noise=0.0):
+    def sdf(self, point):
+        """
+        :param point: Point in 3D for which we want the sdf
+        :return: The sdf value of that point
+        """
+        return np.linalg.norm(np.asarray(point) - self._center) - self.radius
+
+    def sample_surface(self, num_points, noise=0.0):
+        """
+        Samples random points on the surface of the sphere. Probabilities are
+        weighed based on area of each side.
+
+        :param num_points: The number of points to sample on the surface
+        :param noise: The range of uniform noise to apply to samples
+
+        :return: A random pointcloud sampled from the surface of the cuboid
+        """
         assert (
             noise >= 0
         ), "Noise parameter should be a radius of the uniform distribution added to the random points"
@@ -218,6 +353,25 @@ class Sphere:
             unnormalized_points / np.linalg.norm(unnormalized_points, axis=1)[:, None]
         )
         shift = np.tile(self.center, (num_points, 1))
-        random_points = (normalized * self.radius + shift).astype(np.float32)
+        random_points = normalized * self.radius + shift
         noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
         return random_points + noise
+
+    def sample_volume(self, num_points):
+        """
+        Get a random pointcloud sampled inside the sphere (including the surface)
+
+        :param num_points: The number of points to sample
+        :return: A set of points inside the sphere
+        """
+        # First produce points on the surface of the unit sphere
+        unnormalized_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+        normalized = (
+            unnormalized_points / np.linalg.norm(unnormalized_points, axis=1)[:, None]
+        )
+
+        # Now multiply them by random radii in the range [0, self.radius]
+        radii = np.random.uniform(0, self.radius, (num_points, 1))
+
+        shift = np.tile(self.center, (num_points, 1))
+        return normalized * radii + shift
