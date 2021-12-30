@@ -223,6 +223,35 @@ class Cuboid:
         return (self._dims / 2).tolist()
 
     @property
+    def corners(self):
+        x_front, x_back = (
+            self._pose.xyz[0] + self._dims[0] / 2,
+            self._pose.xyz[0] - self._dims[0] / 2,
+        )
+        y_front, y_back = (
+            self._pose.xyz[1] + self._dims[1] / 2,
+            self._pose.xyz[1] - self._dims[1] / 2,
+        )
+        z_front, z_back = (
+            self._pose.xyz[2] + self._dims[2] / 2,
+            self._pose.xyz[2] - self._dims[2] / 2,
+        )
+        corners = np.array(
+            [
+                [x_front, y_front, z_front],
+                [x_back, y_front, z_front],
+                [x_front, y_back, z_front],
+                [x_front, y_front, z_back],
+                [x_back, y_back, z_front],
+                [x_back, y_front, z_back],
+                [x_front, y_back, z_back],
+                [x_back, y_back, z_back],
+            ]
+        )
+        pc.transform(corners, self.pose.matrix, in_place=True)
+        return corners
+
+    @property
     def surface_area(self):
         return 2 * (
             self._dims[0] * self._dims[1]
