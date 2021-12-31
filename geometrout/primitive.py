@@ -225,16 +225,16 @@ class Cuboid:
     @property
     def corners(self):
         x_front, x_back = (
-            self._pose.xyz[0] + self._dims[0] / 2,
-            self._pose.xyz[0] - self._dims[0] / 2,
+            self._dims[0] / 2,
+            -self._dims[0] / 2,
         )
         y_front, y_back = (
-            self._pose.xyz[1] + self._dims[1] / 2,
-            self._pose.xyz[1] - self._dims[1] / 2,
+            self._dims[1] / 2,
+            -self._dims[1] / 2,
         )
         z_front, z_back = (
-            self._pose.xyz[2] + self._dims[2] / 2,
-            self._pose.xyz[2] - self._dims[2] / 2,
+            self._dims[2] / 2,
+            -self._dims[2] / 2,
         )
         corners = np.array(
             [
