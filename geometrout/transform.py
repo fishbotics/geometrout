@@ -132,7 +132,9 @@ class SE3:
         """
         :return: The inverse transformation
         """
-        return SE3(xyz=-self._xyz, so3=self._so3.inverse)
+        so3 = self._so3.inverse
+        xyz = -so3.matrix @ self._xyz
+        return SE3(xyz=xyz, so3=so3)
 
     @property
     def matrix(self):
