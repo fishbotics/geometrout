@@ -13,8 +13,10 @@ class SO3:
         """
         if isinstance(quat, Quaternion):
             self._quat = quat
-        else:
+        elif isinstance(quat, (np.ndarray, list)):
             self._quat = Quaternion(np.asarray(quat))
+        else:
+            raise Exception("Input to SO3 must be Quaternion, np.ndarray, or list")
 
     def __repr__(self):
         return f"SO3(quat={self.wxyz})"
@@ -111,7 +113,6 @@ class SE3:
         else:
             self._xyz = np.asarray(xyz)
             if quat is not None:
-                assert isinstance(quat, Quaternion)
                 self._so3 = SO3(quat)
             elif rpy is not None:
                 self._so3 = SO3.from_rpy(rpy)
