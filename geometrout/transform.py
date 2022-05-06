@@ -22,7 +22,7 @@ class SO3:
         return f"SO3(quat={self.wxyz})"
 
     @classmethod
-    def from_rpy(cls, rpy):
+    def from_rpy(cls, r, p, y):
         """
         Convert roll-pitch-yaw coordinates to a 3x3 homogenous rotation matrix.
 
@@ -37,9 +37,8 @@ class SO3:
         :param rpy: The roll-pitch-yaw coordinates in order (x-rot, y-rot, z-rot).
         :return: An SO3 object
         """
-        coords = np.asanyarray(rpy, dtype=np.float64)
-        c3, c2, c1 = np.cos(rpy)
-        s3, s2, s1 = np.sin(rpy)
+        c3, c2, c1 = np.cos([r, p, y])
+        s3, s2, s1 = np.sin([r, p, y])
 
         matrix = np.array(
             [
