@@ -114,7 +114,7 @@ class SE3:
             if quat is not None:
                 self._so3 = SO3(quat)
             elif rpy is not None:
-                self._so3 = SO3.from_rpy(rpy)
+                self._so3 = SO3.from_rpy(*rpy)
             else:
                 self._so3 = so3
 
