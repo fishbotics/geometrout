@@ -7,19 +7,19 @@ class SO3:
     A generic class defining a 3D orientation. Mostly a wrapper around quaternions
     """
 
-    def __init__(self, quat):
+    def __init__(self, quaternion):
         """
-        :param quat: Quaternion
+        :param quaternion: Quaternion
         """
-        if isinstance(quat, Quaternion):
-            self._quat = quat
-        elif isinstance(quat, (np.ndarray, list)):
-            self._quat = Quaternion(np.asarray(quat))
+        if isinstance(quaternion, Quaternion):
+            self._quat = quaternion
+        elif isinstance(quaternion, (np.ndarray, list)):
+            self._quat = Quaternion(np.asarray(quaternion))
         else:
             raise Exception("Input to SO3 must be Quaternion, np.ndarray, or list")
 
     def __repr__(self):
-        return f"SO3(quat={self.wxyz})"
+        return f"SO3(quaternion={self.wxyz})"
 
     @classmethod
     def from_rpy(cls, r, p, y):
@@ -102,24 +102,25 @@ class SE3:
     A generic class defining a 3D pose with some helper functions for easy conversions
     """
 
-    def __init__(self, matrix=None, xyz=None, quat=None, so3=None, rpy=None):
+    def __init__(self, matrix=None, xyz=None, quaternion=None, so3=None, rpy=None):
         assert bool(matrix is None) != bool(
-            xyz is None and (bool(quat is None) ^ bool(so3 is None) ^ bool(rpy is None))
+            xyz is None
+            and (bool(quaternion is None) ^ bool(so3 is None) ^ bool(rpy is None))
         )
         if matrix is not None:
             self._xyz = matrix[:3, 3]
             self._so3 = SO3(Quaternion(matrix=matrix))
         else:
             self._xyz = np.asarray(xyz)
-            if quat is not None:
-                self._so3 = SO3(quat)
+            if quaternion is not None:
+                self._so3 = SO3(quaternion)
             elif rpy is not None:
                 self._so3 = SO3.from_rpy(*rpy)
             else:
                 self._so3 = so3
 
     def __repr__(self):
-        return f"SE3(xyz={self.xyz}, quat={self.so3.wxyz})"
+        return f"SE3(xyz={self.xyz}, quaternion={self.so3.wxyz})"
 
     def __matmul__(self, other):
         """

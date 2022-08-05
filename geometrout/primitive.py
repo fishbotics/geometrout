@@ -16,7 +16,7 @@ class Cuboid:
         # Note that the input type of these is arrays but I'm still casting.
         # This is because its easier to just case to numpy arrays than it is to
         # check for type
-        self._pose = SE3(xyz=center, so3=SO3(quat=quaternion))
+        self._pose = SE3(xyz=center, so3=SO3(quaternion=quaternion))
         self._dims = np.asarray(dims)
 
     def __str__(self):
@@ -352,7 +352,7 @@ class Sphere:
 
     @property
     def surface_area(self):
-        return 4 * np.pi * self.radius ** 3
+        return 4 * np.pi * self.radius**3
 
     def is_zero_volume(self):
         return np.isclose(self.radius, 0)
@@ -407,9 +407,8 @@ class Sphere:
 
 
 class Cylinder:
-    # TODO switch to SE3 pose instead
     def __init__(self, center, radius, height, quaternion):
-        self._pose = SE3(xyz=center, so3=SO3(quat=quaternion))
+        self._pose = SE3(xyz=center, so3=SO3(quaternion=quaternion))
         self.radius = radius
         self.height = height
 
@@ -496,7 +495,7 @@ class Cylinder:
 
     @property
     def surface_area(self):
-        return self.height * 2 * np.pi * self.radius + 2 * np.pi * self.radius ** 2
+        return self.height * 2 * np.pi * self.radius + 2 * np.pi * self.radius**2
 
     def is_zero_volume(self):
         return np.isclose(self.radius, 0) or np.isclose(self.height, 0)
@@ -544,9 +543,9 @@ class Cylinder:
             size=num_points,
             p=np.array(
                 [
-                    np.pi * self.radius ** 2 / surface_area,
+                    np.pi * self.radius**2 / surface_area,
                     self.height * 2 * np.pi * self.radius / surface_area,
-                    np.pi * self.radius ** 2 / surface_area,
+                    np.pi * self.radius**2 / surface_area,
                 ]
             ),
         )
