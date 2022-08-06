@@ -72,6 +72,20 @@ class SO3:
         return SO3(self._quat.inverse)
 
     @property
+    def rpy(self):
+        """
+        This might not be the most numerically stable and should probably be replaced
+        by whatever Eigen has
+        """
+        matrix = self.matrix
+        yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+        pitch = np.arctan2(
+            -matrix[2, 0], np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2)
+        )
+        roll = np.arctan2(matrix[2, 1], matrix[2, 2])
+        return roll, pitch, yaw
+
+    @property
     def transformation_matrix(self):
         return self._quat.transformation_matrix
 
