@@ -1,28 +1,79 @@
-from pyquaternion import Quaternion
 import numpy as np
+import numba as nb
+from numba.experimental import jitclass
 
 
+@nb.jit(nopython=True)
+def _quaternion_trace_method(matrix, rtol=1e-7, atol=1e-7):
+    """
+    This code uses a modification of the algorithm described in:
+    https://d3cw3dd2w32x2b.cloudfront.net/wp-content/uploads/2015/01/matrix-to-quat.pdf
+    which is itself based on the method described here:
+    http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
+    Altered to work with the column vector convention instead of row vectors
+    """
+    assert matrix.shape == (3, 3)
+    if not np.allclose(
+        np.dot(matrix, matrix.conj().transpose()),
+        np.eye(3),
+        rtol=rtol,
+        atol=atol,
+        equal_nan=False,
+    ):
+        raise ValueError(
+            "Matrix must be orthogonal, i.e. its transpose should be its inverse"
+        )
+    # Re-implemented `np.isclose` for Numba
+    if np.abs(np.linalg.det(matrix) - 1.0) > atol + rtol:
+        raise ValueError(
+            "Matrix must be special orthogonal i.e. its determinant must be +1.0"
+        )
+    m = (
+        matrix.conj().transpose()
+    )  # This method assumes row-vector and postmultiplication of that vector
+    if m[2, 2] < 0:
+        if m[0, 0] > m[1, 1]:
+            t = 1 + m[0, 0] - m[1, 1] - m[2, 2]
+            q = [m[1, 2] - m[2, 1], t, m[0, 1] + m[1, 0], m[2, 0] + m[0, 2]]
+        else:
+            t = 1 - m[0, 0] + m[1, 1] - m[2, 2]
+            q = [m[2, 0] - m[0, 2], m[0, 1] + m[1, 0], t, m[1, 2] + m[2, 1]]
+    else:
+        if m[0, 0] < -m[1, 1]:
+            t = 1 - m[0, 0] - m[1, 1] + m[2, 2]
+            q = [m[0, 1] - m[1, 0], m[2, 0] + m[0, 2], m[1, 2] + m[2, 1], t]
+        else:
+            t = 1 + m[0, 0] + m[1, 1] + m[2, 2]
+            q = [t, m[1, 2] - m[2, 1], m[2, 0] - m[0, 2], m[0, 1] - m[1, 0]]
+
+    q = np.array(q).astype("float64")
+    q *= 0.5 / np.sqrt(t)
+    return q
+
+
+@jitclass([("q", nb.float64[:])])
 class SO3:
     """
     A generic class defining a 3D orientation. Mostly a wrapper around quaternions
     """
 
-    def __init__(self, quaternion):
+    def __init__(self, quaternion: np.ndarray):
         """
-        :param quaternion: Quaternion
+        :param quaternion: np.ndarray
         """
-        if isinstance(quaternion, Quaternion):
-            self._quat = quaternion
-        elif isinstance(quaternion, (np.ndarray, list)):
-            self._quat = Quaternion(np.asarray(quaternion))
-        else:
-            raise Exception("Input to SO3 must be Quaternion, np.ndarray, or list")
+        assert quaternion.shape == (4,)
+        self.q = quaternion / np.linalg.norm(quaternion)
+
+    @staticmethod
+    def from_matrix(matrix, rtol=1e-7, atol=1e-7):
+        q = _quaternion_trace_method(matrix, rtol, atol)
+        return SO3(q)
 
     def __repr__(self):
-        return f"SO3(quaternion={self.wxyz})"
+        return f"SO3(quaternion={self.q})"
 
-    @classmethod
-    def from_rpy(cls, r, p, y):
+    @staticmethod
+    def from_rpy(r, p, y):
         """
         Convert roll-pitch-yaw coordinates to a 3x3 homogenous rotation matrix.
 
@@ -37,8 +88,8 @@ class SO3:
         :param rpy: The roll-pitch-yaw coordinates in order (x-rot, y-rot, z-rot).
         :return: An SO3 object
         """
-        c3, c2, c1 = np.cos([r, p, y])
-        s3, s2, s1 = np.sin([r, p, y])
+        c3, c2, c1 = np.cos(np.array([r, p, y]))
+        s3, s2, s1 = np.sin(np.array([r, p, y]))
 
         matrix = np.array(
             [
@@ -48,28 +99,44 @@ class SO3:
             ],
             dtype=np.float64,
         )
-        return cls(Quaternion(matrix=matrix))
+        return SO3(_quaternion_trace_method(matrix))
 
-    @classmethod
-    def from_unit_axes(cls, x, y, z):
-        assert np.isclose(np.dot(x, y), 0)
-        assert np.isclose(np.dot(x, z), 0)
-        assert np.isclose(np.dot(y, z), 0)
-        assert np.isclose(np.linalg.norm(x), 1)
-        assert np.isclose(np.linalg.norm(y), 1)
-        assert np.isclose(np.linalg.norm(z), 1)
+    def __mul__(self, other):
+        w0, x0, y0, z0 = self.q
+        w1, x1, y1, z1 = other.q
+        return SO3(
+            np.array(
+                [
+                    w0 * w1 + -x0 * x1 + -y0 * y1 + -z0 * z1,
+                    x0 * w1 + w0 * x1 + -z0 * y1 + y0 * z1,
+                    y0 * w1 + z0 * x1 + w0 * y1 + -x0 * z1,
+                    z0 * w1 + -y0 * x1 + x0 * y1 + w0 * z1,
+                ]
+            )
+        )
+
+    @staticmethod
+    def from_unit_axes(x, y, z, rtol=1e-7, atol=1e-7):
+        # assert np.abs(np.dot(x, y)) <= atol
+        # assert np.abs(np.dot(x, z)) <= atol
+        # assert np.abs(np.dot(y, z)) <= atol
+        assert np.abs(np.linalg.norm(x) - 1) <= atol + rtol
+        assert np.abs(np.linalg.norm(y) - 1) <= atol + rtol
+        assert np.abs(np.linalg.norm(z) - 1) <= atol + rtol
         m = np.eye(4)
         m[:3, 0] = x
         m[:3, 1] = y
         m[:3, 2] = z
-        return cls(Quaternion(matrix=m))
+        return SO3(_quaternion_trace_method(m, rtol, atol))
 
     @property
     def inverse(self):
         """
         :return: The inverse of the orientation
         """
-        return SO3(self._quat.inverse)
+        q = np.copy(self.q)
+        q[1:] *= -1
+        return SO3(q)
 
     @property
     def rpy(self):
@@ -87,110 +154,101 @@ class SO3:
 
     @property
     def transformation_matrix(self):
-        return self._quat.transformation_matrix
+        mat = np.eye(4)
+        mat[:3, :3] = self.matrix
+        return mat
 
     @property
     def xyzw(self):
         """
         :return: A list representation of the quaternion as xyzw
         """
-        return self._quat.vector.tolist() + [self._quat.scalar]
+        w, x, y, z = self.q
+        return [x, y, z, w]
 
     @property
     def wxyz(self):
         """
         :return: A list representation of the quaternion as wxyz
         """
-        return [self._quat.scalar] + self._quat.vector.tolist()
+        w, x, y, z = self.q
+        return [w, x, y, z]
 
     @property
     def matrix(self):
         """
         :return: The matrix representation of the orientation
         """
-        return self._quat.rotation_matrix
+        w, x, y, z = self.q
+        return np.array(
+            [
+                [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
+                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 - y**2)],
+            ],
+        )
 
 
+@jitclass([("pos", nb.float64[:])])
 class SE3:
     """
     A generic class defining a 3D pose with some helper functions for easy conversions
     """
 
-    def __init__(self, matrix=None, xyz=None, quaternion=None, so3=None, rpy=None):
-        assert bool(matrix is None) != bool(
-            xyz is None
-            and (bool(quaternion is None) ^ bool(so3 is None) ^ bool(rpy is None))
-        )
-        if matrix is not None:
-            self._xyz = matrix[:3, 3]
-            self._so3 = SO3(Quaternion(matrix=matrix))
-        else:
-            self._xyz = np.asarray(xyz)
-            if quaternion is not None:
-                self._so3 = SO3(quaternion)
-            elif rpy is not None:
-                self._so3 = SO3.from_rpy(*rpy)
-            else:
-                self._so3 = so3
+    so3: SO3
+
+    def __init__(self, pos: np.ndarray, quaternion: np.ndarray):
+        assert pos.shape == (3,)
+        self.pos = pos
+        self.so3 = SO3(quaternion)
 
     def __repr__(self):
         return f"SE3(xyz={self.xyz}, quaternion={self.so3.wxyz})"
 
-    def __matmul__(self, other):
+    def __mul__(self, other):
         """
         Allows for numpy-style matrix multiplication using `@`
         """
-        return SE3(matrix=self.matrix @ other.matrix)
+        so3 = self.so3 * other.so3
+        x, y, z = other.pos
+        pos = np.dot(self.so3.matrix, np.array([x, y, z])) + self.pos
+        return SE3(pos, so3.q)
 
     @property
     def inverse(self):
         """
         :return: The inverse transformation
         """
-        so3 = self._so3.inverse
-        xyz = -so3.matrix @ self._xyz
-        return SE3(xyz=xyz, so3=so3)
+        so3 = self.so3.inverse
+        # Using this copy here because it keeps numba from complaining
+        pos = np.dot(-so3.matrix, np.copy(self.pos))
+        return SE3(pos, so3.q)
 
     @property
     def matrix(self):
         """
         :return: The internal matrix representation
         """
-        m = self._so3.transformation_matrix
-        m[:3, 3] = self.xyz
+        m = self.so3.transformation_matrix
+        m[:3, 3] = self.pos
         return m
-
-    @property
-    def so3(self):
-        """
-        :return: The representation of orientation
-        """
-        return self._so3
-
-    @so3.setter
-    def so3(self, val):
-        """
-        :param val: A pose object
-        """
-        assert isinstance(val, SO3)
-        self._so3 = val
 
     @property
     def xyz(self):
         """
         :return: The translation vector
         """
-        return self._xyz.tolist()
+        x, y, z = self.pos
+        return [x, y, z]
 
-    @xyz.setter
-    def xyz(self, val):
-        """
-        :return: The translation vector
-        """
-        self._xyz = np.asarray(val)
+    @staticmethod
+    def from_matrix(matrix, rtol=1e-7, atol=1e-7):
+        q = _quaternion_trace_method(np.copy(matrix[:3, :3]), rtol, atol)
+        pos = np.copy(matrix[:3, 3])
+        return SE3(pos, q)
 
-    @classmethod
-    def from_unit_axes(cls, origin, x, y, z):
+    @staticmethod
+    def from_unit_axes(origin, x, y, z):
         """
         Constructs SE3 object from unit axes indicating direction and an origin
 
@@ -201,4 +259,4 @@ class SE3:
         :return: SE3 object
         """
         so3 = SO3.from_unit_axes(x, y, z)
-        return cls(xyz=origin, so3=so3)
+        return SE3(origin, so3.q)
