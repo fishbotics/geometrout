@@ -73,6 +73,24 @@ class SO3:
         return f"SO3(quaternion={self.q})"
 
     @staticmethod
+    def unit():
+        return SO3(np.array([1.0, 0.0, 0.0, 0.0]))
+
+    @staticmethod
+    def random():
+        r1, r2, r3 = np.random.random(3)
+        return SO3(
+            np.array(
+                [
+                    np.sqrt(1.0 - r1) * (np.sin(2 * np.pi * r2)),
+                    np.sqrt(1.0 - r1) * (np.cos(2 * np.pi * r2)),
+                    np.sqrt(r1) * (np.sin(2 * np.pi * r3)),
+                    np.sqrt(r1) * (np.cos(2 * np.pi * r3)),
+                ]
+            )
+        )
+
+    @staticmethod
     def from_rpy(r, p, y):
         """
         Convert roll-pitch-yaw coordinates to a 3x3 homogenous rotation matrix.
@@ -100,6 +118,20 @@ class SO3:
             dtype=np.float64,
         )
         return SO3(_quaternion_trace_method(matrix))
+
+    @staticmethod
+    def from_axis_angle(axis, angle):
+        mag = np.linalg.norm(axis)
+        if mag == 0.0:
+            raise ZeroDivisionError("Provided rotation axis has no length")
+        # Ensure axis is in unit vector form
+        if np.abs(1.0 - mag) > 1e-12:
+            axis = axis / mag
+        theta = angle / 2.0
+        r = np.cos(theta)
+        i = axis * np.sin(theta)
+
+        return SO3(np.array([r, i[0], i[1], i[2]]))
 
     def __mul__(self, other):
         w0, x0, y0, z0 = self.q
@@ -137,6 +169,22 @@ class SO3:
         q = np.copy(self.q)
         q[1:] *= -1
         return SO3(q)
+
+    @property
+    def radians(self):
+        theta = 2.0 * np.arctan2(np.linalg.norm(self.q[1:4]), self.q[0])
+        result = ((theta + np.pi) % (2 * np.pi)) - np.pi
+        if np.abs(result + np.pi) < 1e-12:
+            return np.pi
+        return result
+
+    @property
+    def degrees(self):
+        return self.radians / np.pi * 180
+
+    @property
+    def conjugate(self):
+        return self.inverse
 
     @property
     def rpy(self):
@@ -189,7 +237,7 @@ class SO3:
         )
 
 
-@jitclass([("pos", nb.float64[:])])
+@jitclass([("pos", nb.float64[::1])])
 class SE3:
     """
     A generic class defining a 3D pose with some helper functions for easy conversions
@@ -221,7 +269,7 @@ class SE3:
         """
         so3 = self.so3.inverse
         # Using this copy here because it keeps numba from complaining
-        pos = np.dot(-so3.matrix, np.copy(self.pos))
+        pos = np.dot(-so3.matrix, self.pos)
         return SE3(pos, so3.q)
 
     @property

@@ -94,55 +94,36 @@ class Cuboid:
             quaternion=np.array([1.0, 0.0, 0.0, 0.0]),
         )
 
-    # TODO add back in
-    # @staticmethod
-    # def random(
-    #     center_range=[[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
-    #     dimension_range=[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
-    #     quaternion=True,
-    # ):
-    #     """
-    #     Creates a random cuboid within the given ranges
-    #     :param center_range: If given, represents the uniform range from which to draw a center.
-    #         Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
-    #         If passed as None, center defaults to [0, 0, 0]
-    #     :param dimension_range: If given, represents the uniform range from which to draw a center.
-    #         Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
-    #         If passed as None, dimensions defaults to [1, 1, 1]
-    #     :param quaternion: If True, will give a random orientation to cuboid.
-    #         If False, will be set as the identity
-    #         Default is True
-    #     :return: Cuboid object drawn from specified uniform distribution
-    #     """
-    #     if center_range is not None:
-    #         center_range = np.asarray(center_range)
-    #         assert center_range.shape == (
-    #             2,
-    #             3,
-    #         ), "Center range should be passed in as numpy array with 2x3 dimension where first row is the low end of each dimension's range and second row is the high end"
-
-    #         center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
-    #             3
-    #         ) + center_range[0, :]
-    #     else:
-    #         center = np.array([0.0, 0.0, 0.0])
-    #     if dimension_range is not None:
-    #         dimension_range = np.asarray(dimension_range)
-    #         assert dimension_range.shape == (
-    #             2,
-    #             3,
-    #         ), "Dimension range should be passed in as numpy array with 2x3 dimension where first row is the low end of each dimension's range and second row is the high end"
-    #         dims = (dimension_range[1, :] - dimension_range[0, :]) * np.random.rand(
-    #             3
-    #         ) + dimension_range[0, :]
-    #     else:
-    #         dims = np.array([1.0, 1.0, 1.0])
-    #     if quaternion:
-    #         quaternion = Quaternion.random()
-    #     else:
-    #         quaternion = Quaternion([1.0, 0.0, 0.0, 0.0])
-
-    #     return Cuboid(center, dims, quaternion)
+    @staticmethod
+    def random(
+        center_range=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        dimension_range=np.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
+        random_orientation=True,
+    ):
+        """
+        Creates a random cuboid within the given ranges
+        :param center_range: If given, represents the uniform range from which to draw a center.
+            Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
+            If nothing is passed, center will always be at [0, 0, 0]
+        :param dimension_range: If given, represents the uniform range from which to draw a center.
+            Should be np.array with dimension 2x3. First row is lower limit, second row is upper limit
+            If nothing is passed, dimensions defaults to [1, 1, 1]
+        :param quaternion: If True, will give a random orientation to cuboid.
+            If False, will be set as the identity
+            Default is True
+        :return: Cuboid object drawn from specified uniform distribution
+        """
+        center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
+            3
+        ) + center_range[0, :]
+        dims = (dimension_range[1, :] - dimension_range[0, :]) * np.random.rand(
+            3
+        ) + dimension_range[0, :]
+        if random_orientation:
+            pose = SO3.random()
+        else:
+            pose = SO3.unit()
+        return Cuboid(center, dims, pose.q)
 
     def is_zero_volume(self, atol=1e-7):
         for x in self.dims:
@@ -316,37 +297,25 @@ class Sphere:
     def unit():
         return Sphere(np.array([0.0, 0.0, 0.0]), 1.0)
 
-    # TODO add back in
-    # @classmethod
-    # def random(
-    #     cls, center_range=[[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]], radius_range=[0.0, 1.0]
-    # ):
-    #     """
-    #     Creates a random sphere.
-    #     :param center_range: 2x3 numpy array or list with form
-    #       [[x_low, y_low, z_low], [x_high, y_hight, x_max]]. Pass in None to
-    #       default at origin
-    #     :param radius_range: List [r_low, r_high]. Pass in None for
-    #       default radius of None
-    #     """
-    #     if center_range is not None:
-    #         center_range = np.asarray(center_range)
-    #         assert center_range.shape == (
-    #             2,
-    #             3,
-    #         ), "Center range should be passed in as numpy array with 2x3 dimension where first row is the low end of each dimension's range and second row is the high end"
-
-    #         center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
-    #             3
-    #         ) + center_range[0, :]
-    #     else:
-    #         center = np.array([0.0, 0.0, 0.0])
-    #     if radius_range is not None:
-    #         mn, mx = radius_range
-    #         radius = (mx - mn) * np.random.rand() + mn
-    #     else:
-    #         radius = 1.0
-    #     return cls(center, radius)
+    @staticmethod
+    def random(
+        center_range=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        radius_range=np.array([1.0, 1.0]),
+    ):
+        """
+        Creates a random sphere.
+        :param center_range: 2x3 numpy array or list with form
+          [[x_low, y_low, z_low], [x_high, y_hight, x_max]].
+          Nothing passed in will default at origin
+        :param radius_range: List [r_low, r_high].
+          Nothing passed in will default to radius of 1
+        """
+        center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
+            3
+        ) + center_range[0, :]
+        mn, mx = radius_range
+        radius = (mx - mn) * np.random.rand() + mn
+        return Sphere(center, radius)
 
     @property
     def surface_area(self):
@@ -357,7 +326,7 @@ class Sphere:
         return 4 / 3 * np.pi * self.radius**3
 
     def is_zero_volume(self, atol=1e-7):
-        return self.radius < 1e-7
+        return self.radius < atol
 
     def sdf(self, point):
         """
@@ -387,8 +356,7 @@ class Sphere:
         if noise > 0.0:
             noise = np.random.uniform(-noise, noise, points.shape)
             return points + noise
-        else:
-            return points
+        return points
 
     def sample_volume(self, num_points):
         """
@@ -437,52 +405,36 @@ class Cylinder:
         """
         return self.pose.pos
 
-    # TODO add back in
-    # @classmethod
-    # def random(
-    #     cls,
-    #     center_range=[[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
-    #     radius_range=[0.0, 1.0],
-    #     height_range=[0.0, 1.0],
-    #     quaternion=True,
-    # ):
-    #     """
-    #     Creates a random Cylinder.
-    #     :param center_range: 2x3 numpy array or list with form
-    #       [[x_low, y_low, z_low], [x_high, y_hight, x_max]]. Pass in None to
-    #       default at origin
-    #     :param radius_range: List [r_low, r_high]. Pass in None for
-    #       default radius of None
-    #     :param height_range: List [h_low, h_high]. Pass in None for
-    #       default radius of None
-    #     """
-    #     if center_range is not None:
-    #         center_range = np.asarray(center_range)
-    #         assert center_range.shape == (
-    #             2,
-    #             3,
-    #         ), "Center range should be passed in as numpy array with 2x3 dimension where first row is the low end of each dimension's range and second row is the high end"
-
-    #         center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
-    #             3
-    #         ) + center_range[0, :]
-    #     else:
-    #         center = np.array([0.0, 0.0, 0.0])
-    #     if radius_range is not None:
-    #         mn, mx = radius_range
-    #         radius = (mx - mn) * np.random.rand() + mn
-    #     else:
-    #         radius = 1.0
-    #     if height_range is not None:
-    #         mn, mx = height_range
-    #         height = (mx - mn) * np.random.rand() + mn
-    #     else:
-    #         height = 1.0
-    #     if quaternion:
-    #         quaternion = Quaternion.random()
-    #     else:
-    #         quaternion = Quaternion([1.0, 0.0, 0.0, 0.0])
-    #     return cls(center, radius, height, quaternion)
+    @staticmethod
+    def random(
+        center_range=np.array([[0.0, 0, 0], [0.0, 0, 0]]),
+        radius_range=np.array([1.0, 1.0]),
+        height_range=np.array([1.0, 1.0]),
+        random_orientation=True,
+    ):
+        """
+        Creates a random Cylinder.
+        :param center_range: 2x3 numpy array or list with form
+          [[x_low, y_low, z_low], [x_high, y_hight, x_max]].
+          If nothing is passed, center will always be at [0, 0, 0]
+        :param radius_range: List [r_low, r_high]. Pass in None for
+          If nothing is passed, radius will be 1.0
+        :param height_range: List [h_low, h_high]. Pass in None for
+          If nothing is passed, height will be 1.0
+        :param random_orientation: bool Whether to have a random orientation
+        """
+        center = (center_range[1, :] - center_range[0, :]) * np.random.rand(
+            3
+        ) + center_range[0, :]
+        mn, mx = radius_range
+        radius = (mx - mn) * np.random.rand() + mn
+        mn, mx = height_range
+        height = (mx - mn) * np.random.rand() + mn
+        if random_orientation:
+            pose = SO3.random()
+        else:
+            pose = SO3.unit()
+        return Cylinder(center, radius, height, pose.q)
 
     @property
     def surface_area(self):
