@@ -51,6 +51,22 @@ def _quaternion_trace_method(matrix, rtol=1e-7, atol=1e-7):
     return q
 
 
+@nb.jit(nopython=True)
+def _unit_axes_to_quaternion(x, y, z, rtol, atol):
+    assert np.abs(np.linalg.norm(x) - 1) <= atol + rtol
+    assert np.abs(np.linalg.norm(y) - 1) <= atol + rtol
+    assert np.abs(np.linalg.norm(z) - 1) <= atol + rtol
+    assert np.dot(x, y) < atol
+    assert np.dot(x, z) < atol
+    assert np.dot(z, y) < atol
+
+    m = np.eye(3)
+    m[:3, 0] = x
+    m[:3, 1] = y
+    m[:3, 2] = z
+    return _quaternion_trace_method(m, rtol, atol)
+
+
 @jitclass([("q", nb.float64[:])])
 class SO3:
     """
@@ -149,17 +165,7 @@ class SO3:
 
     @staticmethod
     def from_unit_axes(x, y, z, rtol=1e-7, atol=1e-7):
-        # assert np.abs(np.dot(x, y)) <= atol
-        # assert np.abs(np.dot(x, z)) <= atol
-        # assert np.abs(np.dot(y, z)) <= atol
-        assert np.abs(np.linalg.norm(x) - 1) <= atol + rtol
-        assert np.abs(np.linalg.norm(y) - 1) <= atol + rtol
-        assert np.abs(np.linalg.norm(z) - 1) <= atol + rtol
-        m = np.eye(4)
-        m[:3, 0] = x
-        m[:3, 1] = y
-        m[:3, 2] = z
-        return SO3(_quaternion_trace_method(m, rtol, atol))
+        return SO3(_unit_axes_to_quaternion(x, y, z, atol, rtol))
 
     @property
     def inverse(self):
@@ -232,7 +238,7 @@ class SO3:
             [
                 [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
                 [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
-                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 - y**2)],
+                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
             ],
         )
 
@@ -296,7 +302,7 @@ class SE3:
         return SE3(pos, q)
 
     @staticmethod
-    def from_unit_axes(origin, x, y, z):
+    def from_unit_axes(origin, x, y, z, rtol=1e-7, atol=1e-7):
         """
         Constructs SE3 object from unit axes indicating direction and an origin
 
@@ -306,5 +312,5 @@ class SE3:
         :param z: A unit axis indicating the direction of the z axis
         :return: SE3 object
         """
-        so3 = SO3.from_unit_axes(x, y, z)
+        so3 = SO3(_unit_axes_to_quaternion(x, y, z, atol, rtol))
         return SE3(origin, so3.q)
