@@ -1,7 +1,7 @@
 import numpy as np
 import numba as nb
 
-from geometrout.transform import SE3, SO3
+from geometrout.transform import SE3, _random_rotation
 import geometrout.pointcloud as pc
 
 
@@ -54,6 +54,20 @@ class Cuboid:
         # check for type
         self.pose = SE3(center.astype(np.double), quaternion.astype(np.double))
         self.dims = dims.astype(np.double)
+
+    @staticmethod
+    def load(compressed):
+        return Cuboid(
+            np.copy(compressed[:3]), np.copy(compressed[3:6]), np.copy(compressed[6:])
+        )
+
+    def compress(self):
+        return np.concatenate((self.pose.pos, self.dims, self.pose.so3.q))
+
+    def copy(self):
+        return Cuboid(
+            np.copy(self.pose.pos), np.copy(self.dims), np.copy(self.pose.so3.q)
+        )
 
     def __str__(self):
         return "\n".join(
@@ -120,10 +134,10 @@ class Cuboid:
             3
         ) + dimension_range[0, :]
         if random_orientation:
-            pose = SO3.random()
+            quaternion = _random_rotation()
         else:
-            pose = SO3.unit()
-        return Cuboid(center, dims, pose.q)
+            quaternion = np.array([1.0, 0.0, 0.0, 0.0])
+        return Cuboid(center, dims, quaternion)
 
     def is_zero_volume(self, atol=1e-7):
         for x in self.dims:
@@ -263,35 +277,15 @@ class Sphere:
         assert radius >= 0
         self.radius = radius
 
-    def __str__(self):
-        return "\n".join(
-            [
-                "         ▓▓▓▓▓▓▓▓▓▓▓▓               ",
-                "      ░░████░░░░░░░░░░░░████        ",
-                "    ░░██▒▒░░░░░░░░░░░░░░░░░░██      ",
-                "  ░░██▒▒▒▒░░░░░░░░░░░░░░░░░░░░██    ",
-                "  ██▒▒▒▒░░░░░░░░░░░░░░    ░░░░░░██  ",
-                "  ██▒▒▒▒░░░░░░░░░░░░        ░░░░██  ",
-                "██▓▓▒▒▒▒░░░░░░░░░░░░        ░░░░░░██",
-                "██▓▓▒▒▒▒░░░░░░░░░░░░░░    ░░░░░░░░██",
-                "██▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░██",
-                "██▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░██",
-                "██▓▓▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░██",
-                "██▓▓▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░██",
-                "  ▓▓▓▓▓▓▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░██  ",
-                "  ██▓▓▓▓▓▓▒▒▒▒▒▒▒▒░░░░░░░░░░▒▒▒▒██  ",
-                "  ░░▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██░░  ",
-                "    ░░▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒██░░    ",
-                "      ░░██▓▓▓▓▓▓▓▓▓▓▓▓▓▓████░░      ",
-                "        ░░░░████████████░░          ",
-                "            ░░░░░░░░░░░░            ",
-                f"Center: {self.center}",
-                f"Radius: {self.radius}",
-            ]
-        )
+    @staticmethod
+    def load(compressed):
+        return Sphere(np.copy(compressed[:3]), compressed[3])
 
-    def __repr__(self):
-        return f"Sphere(center={self.center}, radius={self.radius})"
+    def compress(self):
+        return np.concatenate((self.center, np.array([self.radius])))
+
+    def copy(self):
+        return Sphere(np.copy(self.center), self.radius)
 
     @staticmethod
     def unit():
@@ -386,6 +380,25 @@ class Cylinder:
         self.radius = radius
         self.height = height
 
+    @staticmethod
+    def load(compressed):
+        return Cylinder(
+            np.copy(compressed[:3]),
+            compressed[3],
+            compressed[4],
+            np.copy(compressed[5:]),
+        )
+
+    def compress(self):
+        return np.concatenate(
+            (self.pose.pos, np.array([self.radius, self.height]), self.pose.so3.q)
+        )
+
+    def copy(self):
+        return Cylinder(
+            np.copy(self.pose.pos), self.radius, self.height, np.copy(self.pose.so3.q)
+        )
+
     def __repr__(self):
         return "\n".join(
             [
@@ -431,10 +444,10 @@ class Cylinder:
         mn, mx = height_range
         height = (mx - mn) * np.random.rand() + mn
         if random_orientation:
-            pose = SO3.random()
+            quaternion = _random_rotation()
         else:
-            pose = SO3.unit()
-        return Cylinder(center, radius, height, pose.q)
+            quaternion = np.array([1.0, 0.0, 0.0, 0.0])
+        return Cylinder(center, radius, height, quaternion)
 
     @property
     def surface_area(self):

@@ -52,6 +52,19 @@ def _quaternion_trace_method(matrix, rtol=1e-7, atol=1e-7):
 
 
 @nb.jit(nopython=True)
+def _random_rotation():
+    r1, r2, r3 = np.random.random(3)
+    return np.array(
+        [
+            np.sqrt(1.0 - r1) * (np.sin(2 * np.pi * r2)),
+            np.sqrt(1.0 - r1) * (np.cos(2 * np.pi * r2)),
+            np.sqrt(r1) * (np.sin(2 * np.pi * r3)),
+            np.sqrt(r1) * (np.cos(2 * np.pi * r3)),
+        ]
+    )
+
+
+@nb.jit(nopython=True)
 def _unit_axes_to_quaternion(x, y, z, rtol, atol):
     assert np.abs(np.linalg.norm(x) - 1) <= atol + rtol
     assert np.abs(np.linalg.norm(y) - 1) <= atol + rtol
@@ -81,6 +94,13 @@ class SO3:
         self.q = quaternion / np.linalg.norm(quaternion)
 
     @staticmethod
+    def load(compressed):
+        return SO3(compressed)
+
+    def compress(self):
+        return np.copy(self.q)
+
+    @staticmethod
     def from_matrix(matrix, rtol=1e-7, atol=1e-7):
         q = _quaternion_trace_method(matrix, rtol, atol)
         return SO3(q)
@@ -94,17 +114,7 @@ class SO3:
 
     @staticmethod
     def random():
-        r1, r2, r3 = np.random.random(3)
-        return SO3(
-            np.array(
-                [
-                    np.sqrt(1.0 - r1) * (np.sin(2 * np.pi * r2)),
-                    np.sqrt(1.0 - r1) * (np.cos(2 * np.pi * r2)),
-                    np.sqrt(r1) * (np.sin(2 * np.pi * r3)),
-                    np.sqrt(r1) * (np.cos(2 * np.pi * r3)),
-                ]
-            )
-        )
+        return SO3(_random_rotation())
 
     @staticmethod
     def from_rpy(r, p, y):
@@ -256,8 +266,12 @@ class SE3:
         self.pos = pos
         self.so3 = SO3(quaternion)
 
-    def __repr__(self):
-        return f"SE3(xyz={self.xyz}, quaternion={self.so3.wxyz})"
+    @staticmethod
+    def load(compressed):
+        return SE3(np.copy(compressed[:3]), np.copy(compressed[3:]))
+
+    def compress(self):
+        return np.concatenate((self.pos, self.so3.q))
 
     def __mul__(self, other):
         """
