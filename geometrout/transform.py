@@ -3,7 +3,7 @@ import numba as nb
 from numba.experimental import jitclass
 
 
-@nb.jit(nopython=True)
+@nb.jit(nopython=True, cache=True)
 def _quaternion_trace_method(matrix, rtol=1e-7, atol=1e-7):
     """
     This code uses a modification of the algorithm described in:
@@ -51,7 +51,7 @@ def _quaternion_trace_method(matrix, rtol=1e-7, atol=1e-7):
     return q
 
 
-@nb.jit(nopython=True)
+@nb.jit(nopython=True, cache=True)
 def _random_rotation():
     r1, r2, r3 = np.random.random(3)
     return np.array(
@@ -64,7 +64,7 @@ def _random_rotation():
     )
 
 
-@nb.jit(nopython=True)
+@nb.jit(nopython=True, cache=True)
 def _unit_axes_to_quaternion(x, y, z, rtol, atol):
     assert np.abs(np.linalg.norm(x) - 1) <= atol + rtol
     assert np.abs(np.linalg.norm(y) - 1) <= atol + rtol
@@ -80,7 +80,92 @@ def _unit_axes_to_quaternion(x, y, z, rtol, atol):
     return _quaternion_trace_method(m, rtol, atol)
 
 
-@jitclass([("q", nb.float64[:])])
+@nb.jit(nopython=True, cache=True)
+def _normalize(v):
+    return v / np.linalg.norm(v)
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_from_rpy(r, p, y):
+    c3, c2, c1 = np.cos(np.array([r, p, y]))
+    s3, s2, s1 = np.sin(np.array([r, p, y]))
+
+    matrix = np.array(
+        [
+            [c1 * c2, (c1 * s2 * s3) - (c3 * s1), (s1 * s3) + (c1 * c3 * s2)],
+            [c2 * s1, (c1 * c3) + (s1 * s2 * s3), (c3 * s1 * s2) - (c1 * s3)],
+            [-s2, c2 * s3, c2 * c3],
+        ],
+        dtype=np.float64,
+    )
+    return _quaternion_trace_method(matrix)
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_from_axis_angle(axis, angle):
+    mag = np.linalg.norm(axis)
+    if mag == 0.0:
+        raise ZeroDivisionError("Provided rotation axis has no length")
+    # Ensure axis is in unit vector form
+    if np.abs(1.0 - mag) > 1e-12:
+        axis = axis / mag
+    theta = angle / 2.0
+    r = np.cos(theta)
+    i = axis * np.sin(theta)
+    return np.array([r, i[0], i[1], i[2]])
+
+
+@nb.jit(nopython=True, cache=True)
+def _rotation_multiply(q1, q2):
+    w0, x0, y0, z0 = q1
+    w1, x1, y1, z1 = q2
+    return np.array(
+        [
+            w0 * w1 + -x0 * x1 + -y0 * y1 + -z0 * z1,
+            x0 * w1 + w0 * x1 + -z0 * y1 + y0 * z1,
+            y0 * w1 + z0 * x1 + w0 * y1 + -x0 * z1,
+            z0 * w1 + -y0 * x1 + x0 * y1 + w0 * z1,
+        ]
+    )
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_inverse(q):
+    qinv = np.copy(q)
+    qinv[1:] *= -1
+    return qinv
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_to_radians(q):
+    theta = 2.0 * np.arctan2(np.linalg.norm(q[1:4]), q[0])
+    result = ((theta + np.pi) % (2 * np.pi)) - np.pi
+    if np.abs(result + np.pi) < 1e-12:
+        return np.pi
+    return result
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_to_matrix(q):
+    w, x, y, z = q
+    return np.array(
+        [
+            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
+        ],
+    )
+
+
+@nb.jit(nopython=True, cache=True)
+def _quaternion_to_rpy(q):
+    matrix = _quaternion_to_matrix(q)
+    yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+    pitch = np.arctan2(-matrix[2, 0], np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
+    roll = np.arctan2(matrix[2, 1], matrix[2, 2])
+    return roll, pitch, yaw
+
+
 class SO3:
     """
     A generic class defining a 3D orientation. Mostly a wrapper around quaternions
@@ -91,14 +176,7 @@ class SO3:
         :param quaternion: np.ndarray
         """
         assert quaternion.shape == (4,)
-        self.q = quaternion / np.linalg.norm(quaternion)
-
-    @staticmethod
-    def load(compressed):
-        return SO3(compressed)
-
-    def compress(self):
-        return np.copy(self.q)
+        self.q = _normalize(quaternion)
 
     @staticmethod
     def from_matrix(matrix, rtol=1e-7, atol=1e-7):
@@ -132,46 +210,14 @@ class SO3:
         :param rpy: The roll-pitch-yaw coordinates in order (x-rot, y-rot, z-rot).
         :return: An SO3 object
         """
-        c3, c2, c1 = np.cos(np.array([r, p, y]))
-        s3, s2, s1 = np.sin(np.array([r, p, y]))
-
-        matrix = np.array(
-            [
-                [c1 * c2, (c1 * s2 * s3) - (c3 * s1), (s1 * s3) + (c1 * c3 * s2)],
-                [c2 * s1, (c1 * c3) + (s1 * s2 * s3), (c3 * s1 * s2) - (c1 * s3)],
-                [-s2, c2 * s3, c2 * c3],
-            ],
-            dtype=np.float64,
-        )
-        return SO3(_quaternion_trace_method(matrix))
+        return SO3(_quaternion_from_rpy(r, p, y))
 
     @staticmethod
     def from_axis_angle(axis, angle):
-        mag = np.linalg.norm(axis)
-        if mag == 0.0:
-            raise ZeroDivisionError("Provided rotation axis has no length")
-        # Ensure axis is in unit vector form
-        if np.abs(1.0 - mag) > 1e-12:
-            axis = axis / mag
-        theta = angle / 2.0
-        r = np.cos(theta)
-        i = axis * np.sin(theta)
-
-        return SO3(np.array([r, i[0], i[1], i[2]]))
+        return SO3(_quaternion_from_axis_angle(axis, angle))
 
     def __mul__(self, other):
-        w0, x0, y0, z0 = self.q
-        w1, x1, y1, z1 = other.q
-        return SO3(
-            np.array(
-                [
-                    w0 * w1 + -x0 * x1 + -y0 * y1 + -z0 * z1,
-                    x0 * w1 + w0 * x1 + -z0 * y1 + y0 * z1,
-                    y0 * w1 + z0 * x1 + w0 * y1 + -x0 * z1,
-                    z0 * w1 + -y0 * x1 + x0 * y1 + w0 * z1,
-                ]
-            )
-        )
+        return SO3(_rotation_multiply(self.q, other.q))
 
     @staticmethod
     def from_unit_axes(x, y, z, rtol=1e-7, atol=1e-7):
@@ -182,21 +228,15 @@ class SO3:
         """
         :return: The inverse of the orientation
         """
-        q = np.copy(self.q)
-        q[1:] *= -1
-        return SO3(q)
+        return SO3(_quaternion_inverse(self.q))
 
     @property
     def radians(self):
-        theta = 2.0 * np.arctan2(np.linalg.norm(self.q[1:4]), self.q[0])
-        result = ((theta + np.pi) % (2 * np.pi)) - np.pi
-        if np.abs(result + np.pi) < 1e-12:
-            return np.pi
-        return result
+        return _quaternion_to_radians(self.q)
 
     @property
     def degrees(self):
-        return self.radians / np.pi * 180
+        return np.degrees(self.radians)
 
     @property
     def conjugate(self):
@@ -208,13 +248,7 @@ class SO3:
         This might not be the most numerically stable and should probably be replaced
         by whatever Eigen has
         """
-        matrix = self.matrix
-        yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
-        pitch = np.arctan2(
-            -matrix[2, 0], np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2)
-        )
-        roll = np.arctan2(matrix[2, 1], matrix[2, 2])
-        return roll, pitch, yaw
+        return _quaternion_to_rpy(self.q)
 
     @property
     def transformation_matrix(self):
@@ -243,17 +277,23 @@ class SO3:
         """
         :return: The matrix representation of the orientation
         """
-        w, x, y, z = self.q
-        return np.array(
-            [
-                [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-                [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
-                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
-            ],
-        )
+        return _quaternion_to_matrix(self.q)
 
 
-@jitclass([("pos", nb.float64[::1])])
+@nb.jit(nopython=True, cache=True)
+def _pose_multiply(pos1, q1, pos2, q2):
+    q = _rotation_multiply(q1, q2)
+    pos = np.dot(_quaternion_to_matrix(q1), pos2) + pos1
+    return pos, q
+
+
+@nb.jit(nopython=True, cache=True)
+def _pose_inverse(pos, q):
+    qinv = _quaternion_inverse(q)
+    posinv = np.dot(-_quaternion_to_matrix(qinv), pos)
+    return posinv, qinv
+
+
 class SE3:
     """
     A generic class defining a 3D pose with some helper functions for easy conversions
@@ -266,31 +306,20 @@ class SE3:
         self.pos = pos
         self.so3 = SO3(quaternion)
 
-    @staticmethod
-    def load(compressed):
-        return SE3(np.copy(compressed[:3]), np.copy(compressed[3:]))
-
-    def compress(self):
-        return np.concatenate((self.pos, self.so3.q))
-
     def __mul__(self, other):
         """
         Allows for numpy-style matrix multiplication using `@`
         """
-        so3 = self.so3 * other.so3
-        x, y, z = other.pos
-        pos = np.dot(self.so3.matrix, np.array([x, y, z])) + self.pos
-        return SE3(pos, so3.q)
+        pos, q = _pose_multiply(self.pos, self.so3.q, other.pos, other.so3.q)
+        return SE3(pos, q)
 
     @property
     def inverse(self):
         """
         :return: The inverse transformation
         """
-        so3 = self.so3.inverse
-        # Using this copy here because it keeps numba from complaining
-        pos = np.dot(-so3.matrix, self.pos)
-        return SE3(pos, so3.q)
+        pos, q = _pose_inverse(self.pos, self.so3.q)
+        return SE3(pos, q)
 
     @property
     def matrix(self):
@@ -312,8 +341,7 @@ class SE3:
     @staticmethod
     def from_matrix(matrix, rtol=1e-7, atol=1e-7):
         q = _quaternion_trace_method(np.copy(matrix[:3, :3]), rtol, atol)
-        pos = np.copy(matrix[:3, 3])
-        return SE3(pos, q)
+        return SE3(np.copy(matrix[:3, 3]), q)
 
     @staticmethod
     def from_unit_axes(origin, x, y, z, rtol=1e-7, atol=1e-7):
@@ -326,5 +354,5 @@ class SE3:
         :param z: A unit axis indicating the direction of the z axis
         :return: SE3 object
         """
-        so3 = SO3(_unit_axes_to_quaternion(x, y, z, atol, rtol))
-        return SE3(origin, so3.q)
+        q = _unit_axes_to_quaternion(x, y, z, atol, rtol)
+        return SE3(origin, q)

@@ -5,7 +5,7 @@ from geometrout.transform import SE3, _random_rotation
 import geometrout.pointcloud as pc
 
 
-@nb.jit
+@nb.jit(nopython=True, cache=True)
 def _rand_choice(arr, prob):
     """
     :param arr: A 1D numpy array of values to sample from.
@@ -15,7 +15,7 @@ def _rand_choice(arr, prob):
     return arr[np.searchsorted(np.cumsum(prob), np.random.random(), side="right")]
 
 
-@nb.jit
+@nb.jit(nopython=True, cache=True)
 def _transform(point_cloud, transformation_matrix):
     """
 
@@ -38,10 +38,99 @@ def _transform(point_cloud, transformation_matrix):
     return point_cloud
 
 
-@nb.experimental.jitclass([("dims", nb.float64[:])])
-class Cuboid:
-    pose: SE3
+@nb.jit(nopython=True, cache=True)
+def _cuboid_sample_surface(
+    pose_matrix,
+    dims,
+    num_points,
+    noise,
+):
+    assert (
+        noise >= 0
+    ), "Noise parameter should be a radius of the uniform distribution added to the random points"
+    random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+    random_points = random_points * dims / 2
+    probs = np.array(
+        [
+            dims[1] * dims[2],
+            dims[1] * dims[2],
+            dims[0] * dims[2],
+            dims[0] * dims[2],
+            dims[0] * dims[1],
+            dims[0] * dims[1],
+        ]
+    )
+    probs /= np.sum(probs)
+    sides = np.searchsorted(
+        np.cumsum(probs), np.random.random(num_points), side="right"
+    )
+    random_points[sides == 0, 0] = dims[0] / 2
+    random_points[sides == 1, 0] = -dims[0] / 2
+    random_points[sides == 2, 1] = dims[1] / 2
+    random_points[sides == 3, 1] = -dims[1] / 2
+    random_points[sides == 4, 2] = dims[2] / 2
+    random_points[sides == 5, 2] = -dims[2] / 2
+    _transform(random_points, pose_matrix)
+    noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
+    return random_points + noise
 
+
+@nb.jit(nopython=True, cache=True)
+def _cuboid_sample_volume(pose_matrix, dims, num_points):
+    random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+    random_points = random_points * dims / 2
+    _transform(random_points, pose_matrix)
+    return random_points
+
+
+@nb.jit(nopython=True, cache=True)
+def _cuboid_sdf(inverse_pose_matrix, dims, point):
+    homog_point = np.ones(4)
+    homog_point[:3] = point
+    projected_point = (inverse_pose_matrix @ homog_point)[:3]
+    distance = np.abs(projected_point) - (dims / 2)
+    outside = np.linalg.norm(np.maximum(distance, np.zeros(3)))
+    inner_max_distance = np.max(distance)
+    inside = np.minimum(inner_max_distance, 0)
+    return outside + inside
+
+
+@nb.jit(nopython=True, cache=True)
+def _cuboid_corners(pose_matrix, dims):
+    x_front, x_back = (
+        dims[0] / 2,
+        -dims[0] / 2,
+    )
+    y_front, y_back = (
+        dims[1] / 2,
+        -dims[1] / 2,
+    )
+    z_front, z_back = (
+        dims[2] / 2,
+        -dims[2] / 2,
+    )
+    corners = np.array(
+        [
+            [x_front, y_front, z_front],
+            [x_back, y_front, z_front],
+            [x_front, y_back, z_front],
+            [x_front, y_front, z_back],
+            [x_back, y_back, z_front],
+            [x_back, y_front, z_back],
+            [x_front, y_back, z_back],
+            [x_back, y_back, z_back],
+        ]
+    )
+    _transform(corners, pose_matrix)
+    return corners
+
+
+@nb.jit(nopython=True, cache=True)
+def _cuboid_surface_area(dims):
+    return 2 * (dims[0] * dims[1] + dims[0] * dims[2] + dims[1] * dims[2])
+
+
+class Cuboid:
     def __init__(self, center, dims, quaternion):
         """
         :param center: np.array([x, y, z])
@@ -54,15 +143,6 @@ class Cuboid:
         # check for type
         self.pose = SE3(center.astype(np.double), quaternion.astype(np.double))
         self.dims = dims.astype(np.double)
-
-    @staticmethod
-    def load(compressed):
-        return Cuboid(
-            np.copy(compressed[:3]), np.copy(compressed[3:6]), np.copy(compressed[6:])
-        )
-
-    def compress(self):
-        return np.concatenate((self.pose.pos, self.dims, self.pose.so3.q))
 
     def copy(self):
         return Cuboid(
@@ -155,35 +235,7 @@ class Cuboid:
 
         :return: A random pointcloud sampled from the surface of the cuboid
         """
-        assert (
-            noise >= 0
-        ), "Noise parameter should be a radius of the uniform distribution added to the random points"
-        random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
-        random_points = random_points * self.dims / 2
-        probs = np.array(
-            [
-                self.dims[1] * self.dims[2],
-                self.dims[1] * self.dims[2],
-                self.dims[0] * self.dims[2],
-                self.dims[0] * self.dims[2],
-                self.dims[0] * self.dims[1],
-                self.dims[0] * self.dims[1],
-            ]
-        )
-        probs /= np.sum(probs)
-        sides = np.searchsorted(
-            np.cumsum(probs), np.random.random(num_points), side="right"
-        )
-        random_points[sides == 0, 0] = self.dims[0] / 2
-        random_points[sides == 1, 0] = -self.dims[0] / 2
-        random_points[sides == 2, 1] = self.dims[1] / 2
-        random_points[sides == 3, 1] = -self.dims[1] / 2
-        random_points[sides == 4, 2] = self.dims[2] / 2
-        random_points[sides == 5, 2] = -self.dims[2] / 2
-        transform = self.pose.matrix
-        _transform(random_points, transform)
-        noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
-        return random_points + noise
+        return _cuboid_sample_surface(self.pose.matrix, self.dims, num_points, noise)
 
     def sample_volume(self, num_points):
         """
@@ -192,25 +244,14 @@ class Cuboid:
         :param num_points: The number of points to sample
         :return: A set of points inside the cube
         """
-        random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
-        random_points = random_points * self.dims / 2
-        transform = self.pose.matrix
-        _transform(random_points, transform)
-        return random_points
+        return _cuboid_sample_volume(self.pose.matrix, self.dims, num_points)
 
     def sdf(self, point):
         """
         :param point: Point in 3D for which we want the sdf
         :return: The sdf value of that point
         """
-        homog_point = np.ones(4)
-        homog_point[:3] = point
-        projected_point = (self.pose.inverse.matrix @ homog_point)[:3]
-        distance = np.abs(projected_point) - (self.dims / 2)
-        outside = np.linalg.norm(np.maximum(distance, np.zeros(3)))
-        inner_max_distance = np.max(distance)
-        inside = np.minimum(inner_max_distance, 0)
-        return outside + inside
+        return _cuboid_sdf(self.pose.inverse.matrix, point)
 
     @property
     def center(self):
@@ -228,43 +269,57 @@ class Cuboid:
 
     @property
     def corners(self):
-        x_front, x_back = (
-            self.dims[0] / 2,
-            -self.dims[0] / 2,
-        )
-        y_front, y_back = (
-            self.dims[1] / 2,
-            -self.dims[1] / 2,
-        )
-        z_front, z_back = (
-            self.dims[2] / 2,
-            -self.dims[2] / 2,
-        )
-        corners = np.array(
-            [
-                [x_front, y_front, z_front],
-                [x_back, y_front, z_front],
-                [x_front, y_back, z_front],
-                [x_front, y_front, z_back],
-                [x_back, y_back, z_front],
-                [x_back, y_front, z_back],
-                [x_front, y_back, z_back],
-                [x_back, y_back, z_back],
-            ]
-        )
-        _transform(corners, self.pose.matrix)
-        return corners
+        return _cuboid_corners(self.pose.matrix, self.dims)
 
     @property
     def surface_area(self):
-        return 2 * (
-            self.dims[0] * self.dims[1]
-            + self.dims[0] * self.dims[2]
-            + self.dims[1] * self.dims[2]
-        )
+        return _cuboid_surface_area(self.dims)
 
 
-@nb.experimental.jitclass([("center", nb.float64[:]), ("radius", nb.float64)])
+@nb.jit(nopython=True, cache=True)
+def _sphere_surface_area(radius):
+    return 4 * np.pi * radius**2
+
+
+@nb.jit(nopython=True, cache=True)
+def _sphere_volume(radius):
+    return 4 / 3 * np.pi * radius**3
+
+
+@nb.jit(nopython=True, cache=True)
+def _sphere_sdf(center, radius, point):
+    return np.linalg.norm(point - center) - radius
+
+
+@nb.jit(nopython=True, cache=True)
+def _sphere_sample_surface(center, radius, num_points, noise):
+    assert (
+        noise >= 0
+    ), "Noise parameter should be a radius of the uniform distribution added to the random points"
+    points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+    for i in range(points.shape[0]):
+        nrm = np.linalg.norm(points[i, :])
+        points[i, :] /= nrm
+    points = radius * points + center
+    if noise > 0.0:
+        noise = np.random.uniform(-noise, noise, points.shape)
+        return points + noise
+    return points
+
+
+@nb.jit(nopython=True, cache=True)
+def _sphere_sample_volume(center, radius, num_points):
+    # First produce points on the surface of the unit sphere
+    points = np.random.uniform(-1.0, 1.0, (num_points, 3))
+    for i in range(points.shape[0]):
+        nrm = np.linalg.norm(points[i, :])
+        points[i, :] /= nrm
+
+    # Now multiply them by random radii in the range [0, radius]
+    radii = np.random.uniform(0, radius, (num_points, 1))
+    return points * radii + center
+
+
 class Sphere:
     def __init__(self, center, radius):
         """
@@ -277,24 +332,17 @@ class Sphere:
         assert radius >= 0
         self.radius = radius
 
-    @staticmethod
-    def load(compressed):
-        return Sphere(np.copy(compressed[:3]), compressed[3])
-
-    def compress(self):
-        return np.concatenate((self.center, np.array([self.radius])))
-
     def copy(self):
         return Sphere(np.copy(self.center), self.radius)
 
     @staticmethod
     def unit():
-        return Sphere(np.array([0.0, 0.0, 0.0]), 1.0)
+        return Sphere(np.zeros(3), 1.0)
 
     @staticmethod
     def random(
-        center_range=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
-        radius_range=np.array([1.0, 1.0]),
+        center_range=np.zeros((2, 3)),
+        radius_range=np.ones(2),
     ):
         """
         Creates a random sphere.
@@ -313,11 +361,11 @@ class Sphere:
 
     @property
     def surface_area(self):
-        return 4 * np.pi * self.radius**2
+        return _sphere_surface_area(self.radius)
 
     @property
     def volume(self):
-        return 4 / 3 * np.pi * self.radius**3
+        return _sphere_volume(self.radius)
 
     def is_zero_volume(self, atol=1e-7):
         return self.radius < atol
@@ -327,7 +375,7 @@ class Sphere:
         :param point: Point in 3D for which we want the sdf
         :return: The sdf value of that point
         """
-        return np.linalg.norm(point - self.center) - self.radius
+        return _sphere_sdf(self.center, self.radius, point)
 
     def sample_surface(self, num_points, noise=0.0):
         """
@@ -339,18 +387,7 @@ class Sphere:
 
         :return: A random pointcloud sampled from the surface of the cuboid
         """
-        assert (
-            noise >= 0
-        ), "Noise parameter should be a radius of the uniform distribution added to the random points"
-        points = np.random.uniform(-1.0, 1.0, (num_points, 3))
-        for i in range(points.shape[0]):
-            nrm = np.linalg.norm(points[i, :])
-            points[i, :] /= nrm
-        points = self.radius * points + self.center
-        if noise > 0.0:
-            noise = np.random.uniform(-noise, noise, points.shape)
-            return points + noise
-        return points
+        return _sphere_sample_surface(self.center, self.radius, num_points, noise)
 
     def sample_volume(self, num_points):
         """
@@ -359,18 +396,99 @@ class Sphere:
         :param num_points: The number of points to sample
         :return: A set of points inside the sphere
         """
-        # First produce points on the surface of the unit sphere
-        points = np.random.uniform(-1.0, 1.0, (num_points, 3))
-        for i in range(points.shape[0]):
-            nrm = np.linalg.norm(points[i, :])
-            points[i, :] /= nrm
-
-        # Now multiply them by random radii in the range [0, self.radius]
-        radii = np.random.uniform(0, self.radius, (num_points, 1))
-        return points * radii + self.center
+        return _sphere_sample_volume(self.center, self.radius, num_points)
 
 
-@nb.experimental.jitclass([("radius", nb.float64), ("height", nb.float64)])
+@nb.jit(nopython=True, cache=True)
+def _cylinder_surface_area(radius, height):
+    return height * 2 * np.pi * radius + 2 * np.pi * radius**2
+
+
+@nb.jit(nopython=True, cache=True)
+def _cylinder_volume(radius, height):
+    return height * np.pi * radius**2
+
+
+@nb.jit(nopython=True, cache=True)
+def _cylinder_sdf(inverse_pose_matrix, radius, height, point):
+    homog_point = np.ones(4)
+    homog_point[:3] = np.asarray(point)
+    projected_point = (inverse_pose_matrix @ homog_point)[:3]
+    surface_distance_xy = np.linalg.norm(projected_point[:2])
+    z_distance = projected_point[2]
+
+    # After having the z distance, we can reduce this problem to a
+    # 2D box computation with size height and width 2 * radius
+    half_extent_2d = np.array([radius, height / 2])
+    point_2d = np.array([surface_distance_xy, z_distance])
+    distance_2d = np.abs(point_2d) - half_extent_2d
+
+    outside = np.linalg.norm(np.maximum(distance_2d, np.zeros(2)))
+    inner_max_distance_2d = np.max(distance_2d)
+    inside = np.minimum(inner_max_distance_2d, 0)
+    return outside + inside
+
+
+@nb.jit(nopython=True, cache=True)
+def _cylinder_sample_surface(pose_matrix, radius, height, num_points, noise):
+    assert (
+        noise >= 0
+    ), "Noise parameter should be a radius of the uniform distribution added to the random points"
+    angles = np.random.uniform(-np.pi, np.pi, num_points)
+    circle_points = np.stack((np.cos(angles), np.sin(angles)), axis=1)
+    surface_area = _cylinder_surface_area(radius, height)
+    probs = np.array(
+        [
+            np.pi * radius**2 / surface_area,
+            height * 2 * np.pi * radius / surface_area,
+            np.pi * radius**2 / surface_area,
+        ]
+    )
+    which_surface = np.searchsorted(
+        np.cumsum(probs), np.random.random(num_points), side="right"
+    )
+    circle_points[which_surface == 0] *= np.random.uniform(
+        0, radius, size=(np.count_nonzero(which_surface == 0), 1)
+    )
+    circle_points[which_surface == 1] *= radius
+    circle_points[which_surface == 2] *= np.random.uniform(
+        0, radius, size=(np.count_nonzero(which_surface == 2), 1)
+    )
+    z = np.ones((num_points, 1))
+    z[which_surface == 0] = -height / 2
+    z[which_surface == 1] = np.random.uniform(
+        -height / 2,
+        height / 2,
+        size=(np.count_nonzero(which_surface == 1), 1),
+    )
+    z[which_surface == 2] = height / 2
+    surface_points = np.concatenate((circle_points, z), axis=1)
+    _transform(surface_points, pose_matrix)
+    noise = 2 * noise * np.random.random_sample(surface_points.shape) - noise
+    return surface_points + noise
+
+
+@nb.jit(nopython=True, cache=True)
+def _cylinder_sample_volume(pose_matrix, radius, height, num_points, noise):
+    assert (
+        noise >= 0
+    ), "Noise parameter should be a radius of the uniform distribution added to the random points"
+    angles = np.random.uniform(-np.pi, np.pi, num_points)
+    disc_points = np.stack((np.cos(angles), np.sin(angles)), axis=1)
+    radii = np.random.uniform(0, radius, size=(num_points, 1))
+    disc_points *= radii
+    volume_points = np.concatenate(
+        (
+            disc_points,
+            np.random.uniform(-height / 2, height / 2, size=(num_points, 1)),
+        ),
+        axis=1,
+    )
+    _transform(volume_points, pose_matrix)
+    noise = 2 * noise * np.random.random_sample(volume_points.shape) - noise
+    return volume_points + noise
+
+
 class Cylinder:
     pose: SE3
 
@@ -379,20 +497,6 @@ class Cylinder:
         self.pose = SE3(center.astype(np.double), quaternion.astype(np.double))
         self.radius = radius
         self.height = height
-
-    @staticmethod
-    def load(compressed):
-        return Cylinder(
-            np.copy(compressed[:3]),
-            compressed[3],
-            compressed[4],
-            np.copy(compressed[5:]),
-        )
-
-    def compress(self):
-        return np.concatenate(
-            (self.pose.pos, np.array([self.radius, self.height]), self.pose.so3.q)
-        )
 
     def copy(self):
         return Cylinder(
@@ -451,11 +555,11 @@ class Cylinder:
 
     @property
     def surface_area(self):
-        return self.height * 2 * np.pi * self.radius + 2 * np.pi * self.radius**2
+        return _cylinder_surface_area(self.radius, self.height)
 
     @property
     def volume(self):
-        return self.height * np.pi * self.radius**2
+        return _cylinder_volume(self.radius, self.height)
 
     def is_zero_volume(self, atol=1e-7):
         return self.radius < atol or self.height < atol
@@ -465,22 +569,7 @@ class Cylinder:
         :param point: Point in 3D for which we want the sdf
         :return: The sdf value of that point
         """
-        homog_point = np.ones(4)
-        homog_point[:3] = np.asarray(point)
-        projected_point = (self.pose.inverse.matrix @ homog_point)[:3]
-        surface_distance_xy = np.linalg.norm(projected_point[:2])
-        z_distance = projected_point[2]
-
-        # After having the z distance, we can reduce this problem to a
-        # 2D box computation with size height and width 2 * radius
-        half_extent_2d = np.array([self.radius, self.height / 2])
-        point_2d = np.array([surface_distance_xy, z_distance])
-        distance_2d = np.abs(point_2d) - half_extent_2d
-
-        outside = np.linalg.norm(np.maximum(distance_2d, np.zeros(2)))
-        inner_max_distance_2d = np.max(distance_2d)
-        inside = np.minimum(inner_max_distance_2d, 0)
-        return outside + inside
+        return _cylinder_sdf(self.pose.inverse.matrix, self.radius, self.height, point)
 
     def sample_surface(self, num_points, noise=0.0):
         """
@@ -492,42 +581,9 @@ class Cylinder:
 
         :return: A random pointcloud sampled from the surface of the cuboid
         """
-        assert (
-            noise >= 0
-        ), "Noise parameter should be a radius of the uniform distribution added to the random points"
-        angles = np.random.uniform(-np.pi, np.pi, num_points)
-        circle_points = np.stack((np.cos(angles), np.sin(angles)), axis=1)
-        surface_area = self.surface_area
-        probs = np.array(
-            [
-                np.pi * self.radius**2 / surface_area,
-                self.height * 2 * np.pi * self.radius / surface_area,
-                np.pi * self.radius**2 / surface_area,
-            ]
+        return _cylinder_sample_surface(
+            self.pose.matrix, self.radius, self.height, num_points, noise
         )
-        which_surface = np.searchsorted(
-            np.cumsum(probs), np.random.random(num_points), side="right"
-        )
-        circle_points[which_surface == 0] *= np.random.uniform(
-            0, self.radius, size=(np.count_nonzero(which_surface == 0), 1)
-        )
-        circle_points[which_surface == 1] *= self.radius
-        circle_points[which_surface == 2] *= np.random.uniform(
-            0, self.radius, size=(np.count_nonzero(which_surface == 2), 1)
-        )
-        z = np.ones((num_points, 1))
-        z[which_surface == 0] = -self.height / 2
-        z[which_surface == 1] = np.random.uniform(
-            -self.height / 2,
-            self.height / 2,
-            size=(np.count_nonzero(which_surface == 1), 1),
-        )
-        z[which_surface == 2] = self.height / 2
-        surface_points = np.concatenate((circle_points, z), axis=1)
-        transform = self.pose.matrix
-        _transform(surface_points, transform)
-        noise = 2 * noise * np.random.random_sample(surface_points.shape) - noise
-        return surface_points + noise
 
     def sample_volume(self, num_points, noise=0.0):
         """
@@ -536,22 +592,6 @@ class Cylinder:
         :param num_points: The number of points to sample
         :return: A set of points inside the sphere
         """
-        assert (
-            noise >= 0
-        ), "Noise parameter should be a radius of the uniform distribution added to the random points"
-        angles = np.random.uniform(-np.pi, np.pi, num_points)
-        disc_points = np.stack((np.cos(angles), np.sin(angles)), axis=1)
-        radii = np.random.uniform(0, self.radius, size=(num_points, 1))
-        disc_points *= radii
-        volume_points = np.concatenate(
-            (
-                disc_points,
-                np.random.uniform(
-                    -self.height / 2, self.height / 2, size=(num_points, 1)
-                ),
-            ),
-            axis=1,
+        return _cylinder_sample_volume(
+            self.pose.matrix, self.radius, self.height, num_points, noise
         )
-        _transform(volume_points, self.pose.matrix)
-        noise = 2 * noise * np.random.random_sample(volume_points.shape) - noise
-        return volume_points + noise
