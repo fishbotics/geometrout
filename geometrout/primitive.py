@@ -83,15 +83,51 @@ def _cuboid_sample_volume(pose_matrix, dims, num_points):
     return random_points
 
 
+@nb.njit
+def np_apply_along_axis(func1d, axis, arr):
+    assert arr.ndim == 2
+    assert axis in [0, 1]
+    if axis == 0:
+        result = np.empty(arr.shape[1])
+        for i in range(len(result)):
+            result[i] = func1d(arr[:, i])
+    else:
+        result = np.empty(arr.shape[0])
+        for i in range(len(result)):
+            result[i] = func1d(arr[i, :])
+    return result
+
+
+@nb.njit
+def np_mean(array, axis):
+    return np_apply_along_axis(np.mean, axis, array)
+
+
+@nb.njit
+def np_std(array, axis):
+    return np_apply_along_axis(np.std, axis, array)
+
+
 @nb.jit(nopython=True, cache=True)
 def _cuboid_sdf(inverse_pose_matrix, dims, point):
-    homog_point = np.ones(4)
-    homog_point[:3] = point
-    projected_point = (inverse_pose_matrix @ homog_point)[:3]
-    distance = np.abs(projected_point) - (dims / 2)
-    outside = np.linalg.norm(np.maximum(distance, np.zeros(3)))
-    inner_max_distance = np.max(distance)
-    inside = np.minimum(inner_max_distance, 0)
+    assert point.ndim < 3
+    if point.ndim == 1:
+        homog_point = np.ones(4)
+        homog_point[:3] = point
+        projected_point = (inverse_pose_matrix @ homog_point)[:3]
+        distance = np.abs(projected_point) - (dims / 2)
+        outside = np.linalg.norm(np.maximum(distance, np.zeros(3)))
+        inner_max_distance = np.max(distance)
+        inside = np.minimum(inner_max_distance, 0)
+    elif point.ndim == 2:
+        homog_point = np.ones((point.shape[0], 4))
+        homog_point[:, :3] = point
+        projected_point = (inverse_pose_matrix @ homog_point.T)[:3, :].T
+        distance = np.abs(projected_point) - (dims / 2)
+        _outside = np.power(np.maximum(distance, np.zeros((1, 3))), 2)
+        outside = np.sqrt(_outside[:, 0] + _outside[:, 1] + _outside[:, 2])
+        inner_max_distance = np_apply_along_axis(np.max, 1, distance)
+        inside = np.minimum(inner_max_distance, 0)
     return outside + inside
 
 
@@ -181,7 +217,7 @@ class Cuboid:
         )
 
     @staticmethod
-    def unit(cls):
+    def unit():
         return Cuboid(
             center=np.array([0.0, 0.0, 0.0]),
             dims=np.array([1.0, 1.0, 1.0]),
@@ -251,7 +287,7 @@ class Cuboid:
         :param point: Point in 3D for which we want the sdf
         :return: The sdf value of that point
         """
-        return _cuboid_sdf(self.pose.inverse.matrix, point)
+        return _cuboid_sdf(self.pose.inverse.matrix, self.dims, point)
 
     @property
     def center(self):
@@ -288,7 +324,11 @@ def _sphere_volume(radius):
 
 @nb.jit(nopython=True, cache=True)
 def _sphere_sdf(center, radius, point):
-    return np.linalg.norm(point - center) - radius
+    assert point.ndim < 3
+    if point.ndim == 1:
+        return np.linalg.norm(point - center) - radius
+    distance2 = np.power(point - center, 2)
+    return np.sqrt(distance2[:, 0] + distance2[:, 1] + distance2[:, 2]) - radius
 
 
 @nb.jit(nopython=True, cache=True)
@@ -411,21 +451,40 @@ def _cylinder_volume(radius, height):
 
 @nb.jit(nopython=True, cache=True)
 def _cylinder_sdf(inverse_pose_matrix, radius, height, point):
-    homog_point = np.ones(4)
-    homog_point[:3] = np.asarray(point)
-    projected_point = (inverse_pose_matrix @ homog_point)[:3]
-    surface_distance_xy = np.linalg.norm(projected_point[:2])
-    z_distance = projected_point[2]
+    assert point.ndim < 3
+    if point.ndim == 1:
+        homog_point = np.ones(4)
+        homog_point[:3] = np.asarray(point)
+        projected_point = (inverse_pose_matrix @ homog_point)[:3]
+        surface_distance_xy = np.linalg.norm(projected_point[:2])
+        z_distance = projected_point[2]
 
-    # After having the z distance, we can reduce this problem to a
-    # 2D box computation with size height and width 2 * radius
-    half_extent_2d = np.array([radius, height / 2])
-    point_2d = np.array([surface_distance_xy, z_distance])
-    distance_2d = np.abs(point_2d) - half_extent_2d
+        # After having the z distance, we can reduce this problem to a
+        # 2D box computation with size height and width 2 * radius
+        half_extent_2d = np.array([radius, height / 2])
+        point_2d = np.array([surface_distance_xy, z_distance])
+        distance_2d = np.abs(point_2d) - half_extent_2d
 
-    outside = np.linalg.norm(np.maximum(distance_2d, np.zeros(2)))
-    inner_max_distance_2d = np.max(distance_2d)
-    inside = np.minimum(inner_max_distance_2d, 0)
+        outside = np.linalg.norm(np.maximum(distance_2d, np.zeros(2)))
+        inner_max_distance_2d = np.max(distance_2d)
+        inside = np.minimum(inner_max_distance_2d, 0)
+    else:
+        homog_point = np.ones((point.shape[0], 4))
+        homog_point[:, :3] = point
+        projected_point = (inverse_pose_matrix @ homog_point.T)[:3, :].T
+        xy2 = np.power(projected_point[:, :2], 2)
+        surface_distance_xy = np.sqrt(xy2[:, 0] + xy2[:, 1])
+        z_distance = projected_point[:, 2]
+
+        half_extent_2d = np.array([radius, height / 2])
+        point_2d = np.stack((surface_distance_xy, z_distance), axis=1)
+        distance_2d = np.abs(point_2d) - half_extent_2d
+
+        _outside = np.power(np.maximum(distance_2d, np.zeros(2)), 2)
+        outside = np.sqrt(_outside[:, 0] + _outside[:, 1])
+        inner_max_distance_2d = np_apply_along_axis(np.max, 1, distance_2d)
+        inside = np.minimum(inner_max_distance_2d, 0)
+
     return outside + inside
 
 
