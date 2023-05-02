@@ -1,41 +1,8 @@
-import numpy as np
 import numba as nb
+import numpy as np
 
 from geometrout.transform import SE3, _random_rotation
-import geometrout.pointcloud as pc
-
-
-@nb.jit(nopython=True, cache=True)
-def _rand_choice(arr, prob):
-    """
-    :param arr: A 1D numpy array of values to sample from.
-    :param prob: A 1D numpy array of probabilities for the given samples.
-    :return: A random sample from the given array with a given probability.
-    """
-    return arr[np.searchsorted(np.cumsum(prob), np.random.random(), side="right")]
-
-
-@nb.jit(nopython=True, cache=True)
-def _transform(point_cloud, transformation_matrix):
-    """
-
-    Parameters
-    ----------
-    :param point_cloud: A numpy pointcloud, maybe with some addition dimensions.
-        This should have shape N x [3 + M] where N is the number of points
-        are some additional mask dimensions or whatever, but the 3 are x-y-z
-    :param transformation_matrix: A 4x4 homography
-    :param in_place: A flag which says whether to do this in place
-    :return: A pointcloud that has been transformed,
-        either the same as the input or a new one.
-    """
-    assert point_cloud.shape[1] == 3
-    homogeneous_xyz = np.concatenate(
-        (np.transpose(point_cloud), np.ones((1, point_cloud.shape[0]))), axis=0
-    )
-    transformed_xyz = np.dot(transformation_matrix, homogeneous_xyz)
-    point_cloud[:, :3] = np.transpose(transformed_xyz[..., :3, :], (1, 0))
-    return point_cloud
+from geometrout.utils import transform_in_place
 
 
 @nb.jit(nopython=True, cache=True)
@@ -70,7 +37,7 @@ def _cuboid_sample_surface(
     random_points[sides == 3, 1] = -dims[1] / 2
     random_points[sides == 4, 2] = dims[2] / 2
     random_points[sides == 5, 2] = -dims[2] / 2
-    _transform(random_points, pose_matrix)
+    transform_in_place(random_points, pose_matrix)
     noise = 2 * noise * np.random.random_sample(random_points.shape) - noise
     return random_points + noise
 
@@ -79,7 +46,7 @@ def _cuboid_sample_surface(
 def _cuboid_sample_volume(pose_matrix, dims, num_points):
     random_points = np.random.uniform(-1.0, 1.0, (num_points, 3))
     random_points = random_points * dims / 2
-    _transform(random_points, pose_matrix)
+    transform_in_place(random_points, pose_matrix)
     return random_points
 
 
@@ -157,7 +124,7 @@ def _cuboid_corners(pose_matrix, dims):
             [x_back, y_back, z_back],
         ]
     )
-    _transform(corners, pose_matrix)
+    transform_in_place(corners, pose_matrix)
     return corners
 
 
@@ -522,7 +489,7 @@ def _cylinder_sample_surface(pose_matrix, radius, height, num_points, noise):
     )
     z[which_surface == 2] = height / 2
     surface_points = np.concatenate((circle_points, z), axis=1)
-    _transform(surface_points, pose_matrix)
+    transform_in_place(surface_points, pose_matrix)
     noise = 2 * noise * np.random.random_sample(surface_points.shape) - noise
     return surface_points + noise
 
@@ -543,7 +510,7 @@ def _cylinder_sample_volume(pose_matrix, radius, height, num_points, noise):
         ),
         axis=1,
     )
-    _transform(volume_points, pose_matrix)
+    transform_in_place(volume_points, pose_matrix)
     noise = 2 * noise * np.random.random_sample(volume_points.shape) - noise
     return volume_points + noise
 
