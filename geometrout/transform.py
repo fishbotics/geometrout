@@ -1,6 +1,5 @@
-import numpy as np
 import numba as nb
-from numba.experimental import jitclass
+import numpy as np
 
 
 @nb.jit(nopython=True, cache=True)
@@ -342,6 +341,16 @@ class SE3:
     def from_matrix(matrix, rtol=1e-7, atol=1e-7):
         q = _quaternion_trace_method(np.copy(matrix[:3, :3]), rtol, atol)
         return SE3(np.copy(matrix[:3, 3]), q)
+
+    def __repr__(self):
+        return "\n".join(
+            [
+                "SE3(",
+                f"    pos={repr(self.pos)},",
+                f"    quaternion={repr(self.so3.q)},",
+                ")",
+            ]
+        )
 
     @staticmethod
     def from_unit_axes(origin, x, y, z, rtol=1e-7, atol=1e-7):
