@@ -166,9 +166,9 @@ class Cuboid:
                 "|         z|  /  ",
                 "|          | /   ",
                 "+----------+     ",
-                f"Center: {self.center}",
-                f"Dimensions: {self.dims}",
-                f"Orientation (wxyz): {self.pose.so3.wxyz}",
+                f"Center: {repr(self.center)}",
+                f"Dimensions: {repr(self.dims)}",
+                f"Orientation (wxyz): {repr(self.pose.so3.q)}",
             ]
         )
 
@@ -176,9 +176,9 @@ class Cuboid:
         return "\n".join(
             [
                 "Cuboid(",
-                f"    center={self.center},",
-                f"    dims={self.dims},",
-                f"    quaternion={self.pose.so3.wxyz},",
+                f"    center={repr(self.center)},",
+                f"    dims={repr(self.dims)},",
+                f"    quaternion={repr(self.pose.so3.q)},",
                 ")",
             ]
         )
@@ -338,6 +338,16 @@ class Sphere:
         self.center = center.astype(np.double)
         assert radius >= 0
         self.radius = radius
+
+    def __repr__(self):
+        return "\n".join(
+            [
+                "Sphere(",
+                f"    center={repr(self.center)},",
+                f"    radius={self.radius},",
+                ")",
+            ]
+        )
 
     def copy(self):
         return Sphere(np.copy(self.center), self.radius)
@@ -533,10 +543,10 @@ class Cylinder:
         return "\n".join(
             [
                 "Cylinder(",
-                f"    center={self.center},",
+                f"    center={repr(self.center)},",
                 f"    radius={self.radius},",
                 f"    height={self.height},",
-                f"    quaternion={self.pose.so3.wxyz},",
+                f"    quaternion={repr(self.pose.so3.q)},",
                 ")",
             ]
         )
