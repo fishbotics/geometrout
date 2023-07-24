@@ -313,6 +313,13 @@ class SE3:
         return SE3(pos, q)
 
     @property
+    def quaternion(self):
+        """
+        Returns the underlying quaternion object
+        """
+        return self.so3.q
+
+    @property
     def inverse(self):
         """
         :return: The inverse transformation
