@@ -85,6 +85,36 @@ def _normalize(v):
 
 
 @nb.jit(nopython=True, cache=True)
+def _slerp(q0, q1, t):
+    """
+    Heavily borrowed from
+    https://github.com/KieranWynn/pyquaternion/blob/master/pyquaternion/quaternion.py#L847
+    """
+    assert t >= 0
+    assert t <= 1
+    q0 = _normalize(q0)
+    q1 = _normalize(q1)
+    dot_product = np.dot(q0, q1)
+    if dot_product < 0.0:
+        q0 = -q0
+        dot_product = -dot_product
+
+    if dot_product > 0.9995:
+        q = q0 + t * (q1 - q0)
+        return _normalize(q)
+    theta0 = np.arccos(dot_product)
+    sin_theta0 = np.sin(theta0)
+
+    theta = theta0 * t
+    sin_theta = np.sin(theta)
+
+    s1 = sin_theta / sin_theta0
+    s0 = np.cos(theta) - dot_product * s1
+    q = s0 * q0 + s1 * q1
+    return _normalize(q)
+
+
+@nb.jit(nopython=True, cache=True)
 def _quaternion_from_rpy(r, p, y):
     c3, c2, c1 = np.cos(np.array([r, p, y]))
     s3, s2, s1 = np.sin(np.array([r, p, y]))
@@ -192,6 +222,12 @@ class SO3:
     @staticmethod
     def random():
         return SO3(_random_rotation())
+
+    @staticmethod
+    def interpolate(r0, r1, t):
+        assert t >= 0
+        assert t <= 1
+        return SO3(_slerp(r0.q, r1.q, t))
 
     @staticmethod
     def from_rpy(r, p, y):
@@ -372,3 +408,11 @@ class SE3:
         """
         q = _unit_axes_to_quaternion(x, y, z, atol, rtol)
         return SE3(origin, q)
+
+    @staticmethod
+    def interpolate(pose0, pose1, t):
+        assert t >= 0
+        assert t <= 1
+        pos = pose0.pos + t * (pose1.pos - pose0.pos)
+        q = SO3.interpolate(pose0.so3, pose1.so3, t).q
+        return SE3(pos, q)
