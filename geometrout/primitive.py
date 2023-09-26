@@ -1,8 +1,8 @@
 import numba as nb
 import numpy as np
 
+from geometrout.maths import transform_in_place
 from geometrout.transform import SE3, _random_rotation
-from geometrout.utils import transform_in_place
 
 
 @nb.jit(nopython=True, cache=True)
